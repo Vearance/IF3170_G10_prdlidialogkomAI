@@ -70,7 +70,7 @@ def run(model_path: str) -> np.ndarray:
 
     X_train = _features(train, TRAIN_PATH, training=True)
     X_test = _features(test, TEST_PATH, training=False)
-    if train[TARGET].isna().any():
+    if train[TARGET].isna().to_numpy().any():
         raise ValueError(f"Target column '{TARGET}' in '{TRAIN_PATH}' contains missing values.")
     if X_train.columns.tolist() != X_test.columns.tolist():
         raise ValueError(
