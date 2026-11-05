@@ -10,11 +10,11 @@ dependencies = [
 ]
 
 [project.scripts]
-# knn = "src.driver:knn_main"
-# logres = "src.driver:logres_main"
-# bayes = "src.driver:bayes_main"
-# dtl = "src.driver:dtl_main"
-# svm = "src.driver:svm_main"
+knn = "src.driver:knn_main"
+logres = "src.driver:logres_main"
+bayes = "src.driver:bayes_main"
+dtl = "src.driver:dtl_main"
+svm = "src.driver:svm_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
