@@ -4,4 +4,21 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.14"
-dependencies = []
+dependencies = [
+    "numpy>=2.5.4",
+    "pandas>=3.1.1",
+]
+
+[project.scripts]
+# knn = "src.driver:knn_main"
+# logres = "src.driver:logres_main"
+# bayes = "src.driver:bayes_main"
+# dtl = "src.driver:dtl_main"
+# svm = "src.driver:svm_main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
