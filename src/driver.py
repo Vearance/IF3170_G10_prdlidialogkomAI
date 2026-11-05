@@ -12,7 +12,7 @@ import pandas as pd
 
 TRAIN_PATH = Path("data/clean/train.csv")
 TEST_PATH = Path("data/clean/test.csv")
-OUTPUT_DIR = Path("data/output")
+OUTPUT_DIR = Path("output")
 TARGET = "is_canceled"
 IGNORED_COLUMNS = ["id"]
 ALGORITHMS = {

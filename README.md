@@ -13,7 +13,7 @@ uv add <package-name>
 
 ## fast train-predict using [driver](src/driver.py)
 
-Trains the selected algorithm with `data/clean/train.csv` and predicts labels for `data/clean/test.csv`. Saves the predictions to a file in `data/output/`.
+Trains the selected algorithm with `data/clean/train.csv` and predicts labels for `data/clean/test.csv`. Saves the predictions to a timestamped file in the root `output/` folder.
 
 ```bash
 uv run knn
