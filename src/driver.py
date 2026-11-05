@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import importlib
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
 
-TRAIN_PATH = Path("clean/train.csv")
-TEST_PATH = Path("clean/test.csv")
-OUTPUT_PATH = Path("clean/predictions.csv")
+TRAIN_PATH = Path("data/clean/train.csv")
+TEST_PATH = Path("data/clean/test.csv")
+OUTPUT_DIR = Path("data/output")
 TARGET = "is_canceled"
 IGNORED_COLUMNS = ["id"]
 ALGORITHMS = {
@@ -89,13 +90,15 @@ def run(model_path: str) -> np.ndarray:
     result = pd.DataFrame({TARGET: predictions})
     if "id" in test.columns:
         result.insert(0, "id", test["id"].to_numpy())
-    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    result.to_csv(OUTPUT_PATH, index=False)
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    output_path = OUTPUT_DIR / f"prediction_{timestamp}.csv"
+    result.to_csv(output_path, index=False)
 
     print(f"Model: {model_path}")
     print(f"Training rows: {len(train)}")
     print(f"Test predictions: {len(predictions)}")
-    print(f"Saved predictions to: {OUTPUT_PATH}")
+    print(f"Saved predictions to: {output_path}")
     return predictions
 
 
