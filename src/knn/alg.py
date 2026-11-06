@@ -6,8 +6,11 @@ import numpy as np
 class KNN:
     """K-Nearest Neighbors classifier using Euclidean distance."""
 
-    def __init__(self, n_neighbors: int = 9):
+    def __init__(self, n_neighbors: int = 7, weights: str = "distance"):
         self.n_neighbors = n_neighbors
+        if weights not in {"uniform", "distance"}:
+            raise ValueError("weights must be 'uniform' or 'distance'.")
+        self.weights = weights
         self.X_train: np.ndarray | None = None
         self.y_train: np.ndarray | None = None
 
@@ -38,4 +41,16 @@ class KNN:
             np.argsort(squared_distances[nearest_indices], kind="stable")[: self.n_neighbors]
         ]
         nearest_labels = self.y_train[nearest_indices].tolist()
-        return Counter(nearest_labels).most_common(1)[0][0]
+
+        if self.weights == "uniform":
+            return Counter(nearest_labels).most_common(1)[0][0]
+
+        distances = np.sqrt(squared_distances[nearest_indices])
+        exact_match = distances == 0
+        if exact_match.any():
+            return Counter(np.asarray(nearest_labels)[exact_match].tolist()).most_common(1)[0][0]
+
+        class_scores: dict[object, float] = {}
+        for label, distance in zip(nearest_labels, distances, strict=True):
+            class_scores[label] = class_scores.get(label, 0.0) + 1.0 / distance
+        return max(class_scores, key=lambda label: class_scores[label])
