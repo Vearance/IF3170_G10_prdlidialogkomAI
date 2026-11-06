@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 TRAIN_PATH = Path("data/clean/train.csv")
+COMBINED_PATH = Path("data/clean/combined.csv")
 VALIDATION_PATH = Path("data/clean/val.csv")
 TEST_PATH = Path("data/clean/test.csv")
 
@@ -118,21 +119,31 @@ def _macro_f1_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 def run(model_path: str) -> None:
     train = pd.read_csv(TRAIN_PATH)
+    combined = pd.read_csv(COMBINED_PATH)
     val = pd.read_csv(VALIDATION_PATH)
     test = pd.read_csv(TEST_PATH)
 
     X_train = _features(train, TRAIN_PATH, require_target=True)
+    X_combined = _features(combined, COMBINED_PATH, require_target=True)
     X_validation = _features(val, VALIDATION_PATH, require_target=True)
     X_test = _features(test, TEST_PATH, require_target=False)
     if train[TARGET].isna().to_numpy().any():
         raise ValueError(f"Target column '{TARGET}' in '{TRAIN_PATH}' contains missing values.")
+    if combined[TARGET].isna().to_numpy().any():
+        raise ValueError(
+            f"Target column '{TARGET}' in '{COMBINED_PATH}' contains missing values."
+        )
     if val[TARGET].isna().to_numpy().any():
         raise ValueError(
             f"Target column '{TARGET}' in '{VALIDATION_PATH}' contains missing values."
         )
 
     expected_columns = X_train.columns.tolist()
-    for source, features in ((VALIDATION_PATH, X_validation), (TEST_PATH, X_test)):
+    for source, features in (
+        (COMBINED_PATH, X_combined),
+        (VALIDATION_PATH, X_validation),
+        (TEST_PATH, X_test),
+    ):
         if features.columns.tolist() != expected_columns:
             raise ValueError(
                 f"Feature columns in '{source}' must match training columns in the same order. "
@@ -160,8 +171,18 @@ def run(model_path: str) -> None:
         val[TARGET].to_numpy(), val_predictions
     )
 
+    final_model = _load_model(model_path)
+    _with_spinner(
+        "Retraining on combined",
+        lambda: final_model.fit(
+            X_combined.to_numpy(), combined[TARGET].to_numpy()
+        ),
+    )
     test_predictions = np.asarray(
-        _with_spinner("Predicting test", lambda: model.predict(X_test.to_numpy()))
+        _with_spinner(
+            "Predicting test",
+            lambda: final_model.predict(X_test.to_numpy()),
+        )
     )
     if test_predictions.shape != (len(test),):
         raise ValueError(
@@ -177,9 +198,10 @@ def run(model_path: str) -> None:
     output_path = OUTPUT_DIR / f"prediction_{timestamp}.csv"
     submission.to_csv(output_path, index=False)
 
-    print(f"Model: {model_path}")
-    print(f"Training rows: {len(train)}")
+    print(f"\nModel: {model_path}")
+    print(f"Validation training rows: {len(train)}")
     print(f"Validation rows: {len(val)}")
+    print(f"Final training rows: {len(combined)}")
     print(f"Validation Macro F1: {macro_f1:.4f}")
     print(f"Test predictions: {len(test_predictions)}")
     print(f"Saved submission (id, {TARGET}) to: {output_path}")
