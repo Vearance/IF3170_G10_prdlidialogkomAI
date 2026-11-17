@@ -26,8 +26,8 @@ uv run svm
 ## authors
 | No. | Nama | NIM |
 |---:|---|---|
-| 1 | - | 13524030 |
+| 1 | Irvin Tandiarrang Sumual | 13524030 |
 | 2 | Bernhard Aprillio Pramana | 13524074 |
-| 3 | - | 13524096 |
+| 3 | Moreno Syawali Ganda Sugita | 13524096 |
 | 4 | Jennifer Khang | 13524110 |
 | 5 | Nathaniel Christian | 13524122 |
