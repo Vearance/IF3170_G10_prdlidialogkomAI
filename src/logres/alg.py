@@ -27,6 +27,8 @@ class LogisticRegression:
         eps: float = 1e-8,
         avg_last_k: int = 1,
         threshold: float = 0.5,
+        neg_weight: float = 1.0,
+        pos_weight: float = 1.0,
         random_state: int | None = 42,
     ):
         if penalty not in {None, "none", "l1", "l2", "elasticnet"}:
@@ -51,6 +53,8 @@ class LogisticRegression:
         self.eps = eps
         self.avg_last_k = avg_last_k
         self.threshold = threshold
+        self.neg_weight = neg_weight
+        self.pos_weight = pos_weight
         self.random_state = random_state
 
         self.x_mean_: np.ndarray | None = None
@@ -165,9 +169,11 @@ class LogisticRegression:
             l1_coeff = self.reg_lambda * self.l1_ratio
             l2_coeff = self.reg_lambda * (1.0 - self.l1_ratio)
 
+        sample_weights = np.where(y == 1.0, self.pos_weight, self.neg_weight)
+
         for t in range(1, self.max_iter + 1):
             p = self._sigmoid(Z @ b)
-            grad = (Z.T @ (y - p)) / n_samples
+            grad = (Z.T @ (sample_weights * (y - p))) / n_samples
 
             if l2_coeff > 0.0:
                 grad[1:] -= l2_coeff * b[1:]
