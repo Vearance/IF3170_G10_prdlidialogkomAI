@@ -19,8 +19,8 @@ class LogisticRegression:
         continuous_cols: int = 14,
         pca_cols: int = 12,
         n_landmarks: int = 0,
-        rbf_gammas: tuple[float, ...] = (0.05, 0.15, 0.35),
-        cont_rbf_gammas: tuple[float, ...] = (0.08, 0.25),
+        rbf_gamma: float = 0.15,
+        cont_rbf_gamma: float = 0.25,
         n_estimators: int = 1,
         beta1: float = 0.9,
         beta2: float = 0.999,
@@ -45,8 +45,8 @@ class LogisticRegression:
         self.continuous_cols = continuous_cols
         self.pca_cols = pca_cols
         self.n_landmarks = n_landmarks
-        self.rbf_gammas = rbf_gammas
-        self.cont_rbf_gammas = cont_rbf_gammas
+        self.rbf_gamma = rbf_gamma
+        self.cont_rbf_gamma = cont_rbf_gamma
         self.n_estimators = n_estimators
         self.beta1 = beta1
         self.beta2 = beta2
@@ -76,6 +76,44 @@ class LogisticRegression:
     def _log_modulus(x: np.ndarray) -> np.ndarray:
         """Log-modulus transform sign(x) * log(1 + |x|)"""
         return np.sign(x) * np.log1p(np.abs(x))
+
+    def get_params(self, deep: bool = True) -> dict[str, Any]:
+        """Return constructor parameters for compatibility with sklearn.clone."""
+        del deep
+        return {
+            name: getattr(self, name)
+            for name in (
+                "learning_rate",
+                "max_iter",
+                "penalty",
+                "reg_lambda",
+                "l1_ratio",
+                "use_basis",
+                "continuous_cols",
+                "pca_cols",
+                "n_landmarks",
+                "rbf_gamma",
+                "cont_rbf_gamma",
+                "n_estimators",
+                "beta1",
+                "beta2",
+                "eps",
+                "avg_last_k",
+                "threshold",
+                "neg_weight",
+                "pos_weight",
+                "random_state",
+            )
+        }
+
+    def set_params(self, **params: Any) -> LogisticRegression:
+        """Set constructor parameters for compatibility with sklearn estimators."""
+        valid_params = self.get_params()
+        for name, value in params.items():
+            if name not in valid_params:
+                raise ValueError(f"Invalid parameter {name!r} for LogisticRegression.")
+            setattr(self, name, value)
+        return self
 
     def _build_deterministic_basis(self, X: np.ndarray, *, fit: bool = False) -> np.ndarray:
         """Build polynomial, cross-category, and quantile spline basis features"""
@@ -130,7 +168,7 @@ class LogisticRegression:
     def _build_rbf_basis(
         self, X: np.ndarray, X_norm_cont: np.ndarray, centers_raw: np.ndarray, centers_cont: np.ndarray
     ) -> np.ndarray:
-        """Build Dual-Space Multi-Scale RBF landmark features (full space + continuous space)."""
+        """Build RBF landmark features in full and normalized continuous spaces."""
         sq_raw = np.maximum(
             0.0,
             np.sum(X**2, axis=1, keepdims=True)
@@ -143,10 +181,9 @@ class LogisticRegression:
             + np.sum(centers_cont**2, axis=1)
             - 2.0 * (X_norm_cont @ centers_cont.T),
         )
-        blocks = [np.exp(-g * sq_raw) for g in self.rbf_gammas]
-        if self.cont_rbf_gammas:
-            blocks.extend(np.exp(-g * sq_cont) for g in self.cont_rbf_gammas)
-        return np.hstack(blocks)
+        raw_features = np.exp(-self.rbf_gamma * sq_raw)
+        cont_features = np.exp(-self.cont_rbf_gamma * sq_cont)
+        return np.hstack([raw_features, cont_features])
 
     def _fit_single_estimator(
         self, Z: np.ndarray, y: np.ndarray

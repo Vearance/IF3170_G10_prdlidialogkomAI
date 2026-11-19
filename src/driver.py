@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib
 import itertools
 import sys
@@ -34,7 +35,7 @@ ALGORITHMS = {
 
 
 def _load_model(model_path: str, **kwargs: Any) -> Any:
-    """Load a model class specified as ``module.path:ClassName``."""
+    """Load and instantiate a model class specified as ``module.path:ClassName``."""
     try:
         module_path, class_name = model_path.split(":", maxsplit=1)
     except ValueError as err:
@@ -49,6 +50,19 @@ def _load_model(model_path: str, **kwargs: Any) -> Any:
     if not callable(model_class):
         raise TypeError(f"'{model_path}' is not a callable model class.")
     return model_class(**kwargs)
+
+
+def _parse_float_tuple(raw: str) -> tuple[float, ...]:
+    try:
+        values = ast.literal_eval(raw)
+    except (ValueError, SyntaxError) as err:
+        raise argparse.ArgumentTypeError("Enter a tuple, e.g. '(0.05, 0.15)'.") from err
+    if not isinstance(values, (tuple, list)):
+        raise argparse.ArgumentTypeError("Enter a tuple, e.g. '(0.05, 0.15)'.")
+    try:
+        return tuple(float(value) for value in values)
+    except (TypeError, ValueError) as err:
+        raise argparse.ArgumentTypeError("Tuple values must be numbers.") from err
 
 
 def _features(data: pd.DataFrame, source: Path, *, require_target: bool) -> pd.DataFrame:
@@ -223,7 +237,37 @@ def knn_main() -> None:
 
 
 def logres_main() -> None:
-    _run_algorithm("logres")
+    parser = argparse.ArgumentParser(
+        description="Evaluate Logistic Regression and create a test submission."
+    )
+    parser.add_argument("--learning-rate", type=float, default=0.01)
+    parser.add_argument("--max-iter", type=int, default=100)
+    parser.add_argument(
+        "--penalty", choices=["none", "l1", "l2", "elasticnet"], default="none"
+    )
+    parser.add_argument("--reg-lambda", type=float, default=0.0001)
+    parser.add_argument("--l1-ratio", type=float, default=0.5)
+    parser.add_argument("--use-basis", action="store_true")
+    parser.add_argument("--continuous-cols", type=int, default=14)
+    parser.add_argument("--pca-cols", type=int, default=12)
+    parser.add_argument("--n-landmarks", type=int, default=0)
+    parser.add_argument("--rbf-gammas", type=_parse_float_tuple, default=(0.05, 0.15, 0.35))
+    parser.add_argument("--cont-rbf-gammas", type=_parse_float_tuple, default=(0.08, 0.25))
+    parser.add_argument("--n-estimators", type=int, default=1)
+    parser.add_argument("--beta1", type=float, default=0.9)
+    parser.add_argument("--beta2", type=float, default=0.999)
+    parser.add_argument("--eps", type=float, default=1e-8)
+    parser.add_argument("--avg-last-k", type=int, default=1)
+    parser.add_argument("--threshold", type=float, default=0.5)
+    parser.add_argument("--neg-weight", type=float, default=1.0)
+    parser.add_argument("--pos-weight", type=float, default=1.0)
+    parser.add_argument("--random-state", type=int, default=42)
+    args = parser.parse_args()
+
+    kwargs = vars(args)
+    if kwargs["penalty"] == "none":
+        kwargs["penalty"] = None
+    _run_algorithm("logres", **kwargs)
 
 
 def bayes_main() -> None:
