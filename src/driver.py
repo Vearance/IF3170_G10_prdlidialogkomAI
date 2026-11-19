@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import inspect
 import itertools
 import sys
 import threading
@@ -200,10 +199,6 @@ def run(model_path: str, **model_kwargs: Any) -> None:
     output_path = OUTPUT_DIR / f"prediction_{timestamp}.csv"
     submission.to_csv(output_path, index=False)
 
-    active_params = {
-        name: getattr(final_model, name, param.default)
-        for name, param in _get_model_parameters(model_path).items()
-    }
     print(f"\nModel: {model_path}")
     if model_kwargs:
         params_str = ", ".join(f"{k}={v}" for k, v in model_kwargs.items())
