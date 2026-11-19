@@ -1,9 +1,3 @@
-from __future__ import annotations
-
-import pickle
-from pathlib import Path
-from typing import Self
-
 import numpy as np
 
 
@@ -16,8 +10,8 @@ class NaiveBayes:
 
     def __init__(
         self,
-        var_smoothing: float = 1.6700670067,
-        decision_threshold: float | None = 0.43300013524074,
+        var_smoothing: float = 0.010067,
+        decision_threshold: float | None = 0.850013524074,
     ):
         if not np.isfinite(var_smoothing) or var_smoothing < 0.0:
             raise ValueError("var_smoothing must be a finite non-negative number.")
@@ -30,7 +24,7 @@ class NaiveBayes:
         self.theta_: np.ndarray | None = None
         self.var_: np.ndarray | None = None
 
-    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> Self:
+    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> "NaiveBayes":
         X = self._validate_features(X_train, "X_train")
         y = np.asarray(y_train)
         if y.ndim != 1:
@@ -89,19 +83,6 @@ class NaiveBayes:
             return self.classes_[(probabilities >= self.decision_threshold).astype(int)]
         return self.classes_[np.argmax(self.predict_log_proba(X), axis=1)]
 
-    def save(self, path: str | Path) -> None:
-        self._check_fitted()
-        with Path(path).open("wb") as file:
-            pickle.dump(self, file)
-
-    @classmethod
-    def load(cls, path: str | Path) -> Self:
-        with Path(path).open("rb") as file:
-            model = pickle.load(file)
-        if not isinstance(model, cls):
-            raise TypeError(f"File does not contain a {cls.__name__} model.")
-        return model
-
     @staticmethod
     def _validate_features(X: np.ndarray, name: str) -> np.ndarray:
         features = np.asarray(X, dtype=float)
@@ -118,5 +99,3 @@ class NaiveBayes:
     def _check_fitted(self) -> None:
         if any(value is None for value in (self.classes_, self.class_prior_, self.theta_, self.var_)):
             raise ValueError("This NaiveBayes instance is not fitted yet. Call fit() before prediction.")
-
-BayesianNetwork = NaiveBayes
