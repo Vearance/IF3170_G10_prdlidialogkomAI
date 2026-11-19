@@ -6,6 +6,7 @@ import argparse
 import ast
 import importlib
 import itertools
+import re
 import sys
 import threading
 import time
@@ -118,6 +119,26 @@ def _with_spinner[Result](label: str, operation: Callable[[], Result]) -> Result
     return result
 
 
+def _submission_filename(
+    model_path: str, model_kwargs: dict[str, Any], timestamp: str
+) -> str:
+    """Build a readable, filesystem-safe submission filename from model parameters."""
+    module_path, _, class_name = model_path.partition(":")
+    module_parts = module_path.split(".")
+    model_name = module_parts[-2] if len(module_parts) > 1 else class_name.lower()
+
+    def slug(value: Any) -> str:
+        text = re.sub(r"[^a-zA-Z0-9_.-]+", "-", str(value)).strip("-._")
+        return text or "empty"
+
+    parameter_parts = [
+        f"{slug(name)}-{slug(value)}"
+        for name, value in sorted(model_kwargs.items())
+    ]
+    suffix = f"_{'_'.join(parameter_parts)}" if parameter_parts else ""
+    return f"{model_name}{suffix}_{timestamp}.csv"
+
+
 def _macro_f1_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     labels = dict.fromkeys(np.concatenate((y_true, y_pred)).tolist())
     class_scores = []
@@ -210,7 +231,7 @@ def run(model_path: str, **model_kwargs: Any) -> None:
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = OUTPUT_DIR / f"prediction_{timestamp}.csv"
+    output_path = OUTPUT_DIR / _submission_filename(model_path, model_kwargs, timestamp)
     submission.to_csv(output_path, index=False)
 
     print(f"\nModel: {model_path}")
