@@ -102,6 +102,8 @@ def _resolve_model_kwargs(model_path: str, argv: list[str] | None = None) -> dic
         print("\nFlags:")
         print("  -y, --default          Run immediately with default parameters (no prompt)")
         print("  -i, --interactive      Prompt interactively for each parameter")
+        if model_path == ALGORITHMS["logres"]:
+            print("  --visualize            Generate log-loss contour & trajectory .avi video")
         raise SystemExit(0)
 
     use_defaults_flag = False
@@ -333,9 +335,34 @@ def run(model_path: str, model_kwargs: dict[str, Any] | None = None) -> None:
 
 def _run_algorithm(name: str, argv: list[str] | None = None) -> None:
     try:
+        raw_args = list(sys.argv[1:] if argv is None else argv)
+        visualize = False
+        clean_args: list[str] = []
+        for arg in raw_args:
+            if arg in {"--visualize", "--video"}:
+                visualize = True
+            else:
+                clean_args.append(arg)
+
         model_path = ALGORITHMS[name]
-        model_kwargs = _resolve_model_kwargs(model_path, argv=argv)
+        model_kwargs = _resolve_model_kwargs(model_path, argv=clean_args)
         run(model_path, model_kwargs=model_kwargs)
+
+        if visualize:
+            if name != "logres":
+                raise ValueError("--visualize is currently only supported for 'logres'.")
+            from src.logres.visualize import generate_contour_video
+
+            vid_kwargs: dict[str, Any] = {}
+            if "learning_rate" in model_kwargs:
+                vid_kwargs["learning_rate"] = float(model_kwargs["learning_rate"])
+            if "max_iter" in model_kwargs:
+                vid_kwargs["max_iter"] = int(model_kwargs["max_iter"])
+            video_path = _with_spinner(
+                "Rendering contour video",
+                lambda: generate_contour_video(**vid_kwargs),
+            )
+            print(f"Saved contour video to: {video_path}")
     except (OSError, ValueError, TypeError) as err:
         raise SystemExit(f"Error running {name}: {err}") from err
 
