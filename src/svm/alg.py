@@ -1,15 +1,34 @@
-from functools import partial
-import numpy as np
 import random
+from collections.abc import Callable
+from functools import partial
+from typing import Self
+
+import numpy as np
+
 
 def linear_kernel(x_i: np.ndarray, x_j: np.ndarray) -> float:
-    return x_i @ x_j
+    return float(x_i @ x_j)
+
 
 def polynomial_kernel(x_i: np.ndarray, x_j: np.ndarray, degree: int, gamma: float, coef0: float) -> float:
-    return (gamma * (x_i @ x_j) + coef0) ** degree
+    return float((gamma * (x_i @ x_j) + coef0) ** degree)
+
 
 def gaussian_kernel(x_i: np.ndarray, x_j: np.ndarray, gamma: float) -> float:
-    return np.exp(-gamma * np.sum((x_i - x_j) ** 2, axis=-1))
+    return float(np.exp(-gamma * np.sum((x_i - x_j) ** 2)))
+
+
+def linear_kernel_matrix(X: np.ndarray, x: np.ndarray) -> np.ndarray:
+    return X @ x
+
+
+def polynomial_kernel_matrix(X: np.ndarray, x: np.ndarray, degree: int, gamma: float, coef0: float) -> np.ndarray:
+    return (gamma * (X @ x) + coef0) ** degree
+
+
+def gaussian_kernel_matrix(X: np.ndarray, x: np.ndarray, gamma: float) -> np.ndarray:
+    return np.exp(-gamma * np.sum((X - x) ** 2, axis=-1))
+
 
 #https://awstip.com/support-vector-machines-svms-a-beginners-guide-54e5c7913fc8
 #https://cs229.stanford.edu/materials/smo.pdf
@@ -20,7 +39,7 @@ class SVM:
                 tol : float = 1e-3,
                 kernel : str = "linear",
                 degree : int = 3,
-                gamma : str = 'auto',
+                gamma : str | float = 'auto',
                 coef0 : float = 0,
                 seed = None
                 ):
@@ -39,10 +58,11 @@ class SVM:
         self.bias: float = 0.0
         self.X_train: np.ndarray | None = None
         self.Y_train: np.ndarray | None = None
-        self._kernel_fn = None
+        self._kernel_fn: Callable[[np.ndarray, np.ndarray], float] | None = None
+        self._kernel_matrix_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None
         self._errors_cache: np.ndarray | None = None
 
-    def fit(self, X_train: np.ndarray, Y_train: np.ndarray) -> "SVM":
+    def fit(self, X_train: np.ndarray, Y_train: np.ndarray) -> Self:
         self.X_train = X_train
         self.Y_train = np.where(Y_train == 0, -1, 1).astype(np.float64)
         self.rng = random.Random(self.seed)
@@ -127,9 +147,16 @@ class SVM:
         gamma_value = self._resolve_gamma(X)
         if self.kernel == "linear":
             self._kernel_fn = linear_kernel
+            self._kernel_matrix_fn = linear_kernel_matrix
         elif self.kernel == "poly":
             self._kernel_fn = partial(
                 polynomial_kernel,
+                degree=self.degree,
+                gamma=gamma_value,
+                coef0=self.coef0
+            )
+            self._kernel_matrix_fn = partial(
+                polynomial_kernel_matrix,
                 degree=self.degree,
                 gamma=gamma_value,
                 coef0=self.coef0
@@ -139,22 +166,32 @@ class SVM:
                 gaussian_kernel,
                 gamma=gamma_value
             )
+            self._kernel_matrix_fn = partial(
+                gaussian_kernel_matrix,
+                gamma=gamma_value
+            )
 
     def _resolve_gamma(self, X: np.ndarray) -> float:
         n_features = X.shape[1]
+        if isinstance(self.gamma, (int, float)):
+            return float(self.gamma)
         if self.gamma == "auto":
             return 1.0 / n_features
         elif self.gamma == "scale":
-            return 1.0 / (n_features * X.var())
-        raise ValueError("Gamma must be between auto or scale")
+            return 1.0 / (n_features * float(X.var()))
+        raise ValueError("Gamma must be 'auto', 'scale', or a numeric float")
 
     def _update_error_cache(
         self, X_train: np.ndarray,
         i: int, j: int,
         alpha_i_old: float, alpha_j_old: float,
         bias_old: float) -> None:
-        k_all_i = self._kernel_fn(X_train, X_train[i])
-        k_all_j = self._kernel_fn(X_train, X_train[j])
+        assert self._kernel_matrix_fn is not None
+        assert self.alphas is not None
+        assert self.Y_train is not None
+        assert self._errors_cache is not None
+        k_all_i = self._kernel_matrix_fn(X_train, X_train[i])
+        k_all_j = self._kernel_matrix_fn(X_train, X_train[j])
         delta_E = (
             (self.alphas[i] - alpha_i_old) * self.Y_train[i] * k_all_i
             + (self.alphas[j] - alpha_j_old) * self.Y_train[j] * k_all_j
@@ -163,12 +200,16 @@ class SVM:
         self._errors_cache += delta_E
 
     def _compute_decision_value(self, x: np.ndarray) -> float:
+        assert self.alphas is not None
         sv = np.where(self.alphas > 0)[0]
         if len(sv) == 0:
             return self.bias
         
-        kernel_values = self._kernel_fn(self.X_train[sv], x)
-        return np.sum(self.alphas[sv] * self.Y_train[sv] * kernel_values) + self.bias
+        assert self._kernel_matrix_fn is not None
+        assert self.X_train is not None
+        assert self.Y_train is not None
+        kernel_values = self._kernel_matrix_fn(self.X_train[sv], x)
+        return float(np.sum(self.alphas[sv] * self.Y_train[sv] * kernel_values) + self.bias)
 
     def _compute_alpha_lowerbound(self, y_i: float, y_j: float,
                                 alpha_i: float, alpha_j: float) -> float:
@@ -192,6 +233,7 @@ class SVM:
         return j + 1
     
     def _compute_dual_objective_second_derivative(self, x_i: np.ndarray, x_j: np.ndarray) -> float:
+        assert self._kernel_fn is not None
         return 2 * self._kernel_fn(x_i, x_j) - self._kernel_fn(x_i, x_i) - self._kernel_fn(x_j, x_j)
 
     def _compute_optimal_alpha_j(self, alpha_j_old: float, y_j: float,
@@ -220,6 +262,7 @@ class SVM:
             alpha_i_new: float, alpha_j_new: float,
             error_i: float,
         ) -> float:
+        assert self._kernel_fn is not None
         return float(
             self.bias - error_i
             - y_i * (alpha_i_new - alpha_i_old) * self._kernel_fn(x_i, x_i)
@@ -233,6 +276,7 @@ class SVM:
             alpha_i_new: float, alpha_j_new: float,
             error_j: float,
         ) -> float:
+        assert self._kernel_fn is not None
         return float(
             self.bias - error_j
             - y_i * (alpha_i_new - alpha_i_old) * self._kernel_fn(x_i, x_j)
