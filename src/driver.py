@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import ast
+import argparse
 import importlib
 import inspect
 import itertools
@@ -34,7 +34,7 @@ ALGORITHMS = {
 }
 
 
-def _load_model_class(model_path: str) -> type[Any]:
+def _load_model(model_path: str, **kwargs: Any) -> Any:
     """Load a model class specified as ``module.path:ClassName``."""
     try:
         module_path, class_name = model_path.split(":", maxsplit=1)
@@ -49,123 +49,7 @@ def _load_model_class(model_path: str) -> type[Any]:
 
     if not callable(model_class):
         raise TypeError(f"'{model_path}' is not a callable model class.")
-    return model_class
-
-
-def _load_model(model_path: str, **kwargs: Any) -> Any:
-    """Instantiate a model class specified as ``module.path:ClassName`` with kwargs."""
-    model_class = _load_model_class(model_path)
     return model_class(**kwargs)
-
-
-def _parse_value(raw: str) -> Any:
-    """Convert a string CLI/input value into int, float, bool, None, tuple, or str."""
-    text = raw.strip()
-    lower = text.lower()
-    if lower in {"none", "null"}:
-        return None
-    if lower == "true":
-        return True
-    if lower == "false":
-        return False
-    try:
-        return ast.literal_eval(text)
-    except (ValueError, SyntaxError):
-        return text
-
-
-def _get_model_parameters(model_path: str) -> dict[str, inspect.Parameter]:
-    """Inspect __init__ parameters of the target model class."""
-    model_class = _load_model_class(model_path)
-    sig = inspect.signature(model_class.__init__)
-    return {
-        name: param
-        for name, param in sig.parameters.items()
-        if name != "self"
-        and param.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-    }
-
-
-def _resolve_model_kwargs(model_path: str, argv: list[str] | None = None) -> dict[str, Any]:
-    """Parse CLI arguments or interactively prompt for model parameters in the terminal."""
-    args = list(sys.argv[1:] if argv is None else argv)
-    params = _get_model_parameters(model_path)
-    _, class_name = model_path.split(":", maxsplit=1)
-
-    if any(arg in {"-h", "--help"} for arg in args):
-        print(f"Model: {model_path}")
-        print("\nAvailable parameters:")
-        for name, param in params.items():
-            default = param.default if param.default is not inspect.Parameter.empty else "<required>"
-            flag = f"--{name.replace('_', '-')}"
-            print(f"  {flag:<22} (or {name}=<val>)  default: {default!r}")
-        print("\nFlags:")
-        print("  -y, --default          Run immediately with default parameters (no prompt)")
-        print("  -i, --interactive      Prompt interactively for each parameter")
-        if model_path == ALGORITHMS["logres"]:
-            print("  --visualize            Generate log-loss contour & trajectory .avi video")
-        raise SystemExit(0)
-
-    use_defaults_flag = False
-    force_interactive = False
-    filtered_args: list[str] = []
-    for arg in args:
-        if arg in {"-y", "--yes", "--default"}:
-            use_defaults_flag = True
-        elif arg in {"-i", "--interactive"}:
-            force_interactive = True
-        else:
-            filtered_args.append(arg)
-
-    kwargs: dict[str, Any] = {}
-    i = 0
-    while i < len(filtered_args):
-        token = filtered_args[i]
-        if token.startswith("--"):
-            body = token[2:]
-            if "=" in body:
-                key_raw, val_raw = body.split("=", maxsplit=1)
-                i += 1
-            else:
-                key_raw = body
-                if i + 1 >= len(filtered_args):
-                    raise ValueError(f"Option '{token}' requires a value.")
-                val_raw = filtered_args[i + 1]
-                i += 2
-            key = key_raw.replace("-", "_")
-        elif "=" in token:
-            key_raw, val_raw = token.split("=", maxsplit=1)
-            key = key_raw.replace("-", "_")
-            i += 1
-        else:
-            raise ValueError(
-                f"Unrecognized argument '{token}'. Use '--param value' or 'param=value'."
-            )
-
-        if key not in params:
-            valid_list = ", ".join(params.keys())
-            raise ValueError(
-                f"Unknown parameter '{key}' for {class_name}. Valid parameters: {valid_list}."
-            )
-        kwargs[key] = _parse_value(val_raw)
-
-    # Interactive prompt if running in an interactive terminal without CLI overrides
-    if (force_interactive or (not kwargs and not use_defaults_flag and sys.stdin.isatty())) and params:
-        print(f"\n=== Parameter Setup: {class_name} ===")
-        print("Masukkan nilai parameter (tekan Enter untuk menggunakan nilai default):")
-        for name, param in params.items():
-            if name in kwargs:
-                continue
-            default = param.default if param.default is not inspect.Parameter.empty else None
-            try:
-                user_input = input(f"  {name} [{default!r}]: ").strip()
-            except EOFError:
-                break
-            if user_input != "":
-                kwargs[name] = _parse_value(user_input)
-        print()
-
-    return kwargs
 
 
 def _features(data: pd.DataFrame, source: Path, *, require_target: bool) -> pd.DataFrame:
@@ -235,11 +119,7 @@ def _macro_f1_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(class_scores))
 
 
-def run(model_path: str, model_kwargs: dict[str, Any] | None = None) -> None:
-    kwargs = model_kwargs or {}
-    # Validate model instantiation upfront before loading CSVs
-    model = _load_model(model_path, **kwargs)
-
+def run(model_path: str, **model_kwargs: Any) -> None:
     train = pd.read_csv(TRAIN_PATH)
     combined = pd.read_csv(COMBINED_PATH)
     val = pd.read_csv(VALIDATION_PATH)
@@ -272,6 +152,7 @@ def run(model_path: str, model_kwargs: dict[str, Any] | None = None) -> None:
                 f"Train: {expected_columns}; found: {features.columns.tolist()}."
             )
 
+    model = _load_model(model_path, **model_kwargs)
     _with_spinner(
         "Training model",
         lambda: model.fit(X_train.to_numpy(), train[TARGET].to_numpy()),
@@ -292,7 +173,7 @@ def run(model_path: str, model_kwargs: dict[str, Any] | None = None) -> None:
         val[TARGET].to_numpy(), val_predictions
     )
 
-    final_model = _load_model(model_path, **kwargs)
+    final_model = _load_model(model_path, **model_kwargs)
     _with_spinner(
         "Retraining on combined",
         lambda: final_model.fit(
@@ -324,7 +205,9 @@ def run(model_path: str, model_kwargs: dict[str, Any] | None = None) -> None:
         for name, param in _get_model_parameters(model_path).items()
     }
     print(f"\nModel: {model_path}")
-    print(f"Parameters: {active_params}")
+    if model_kwargs:
+        params_str = ", ".join(f"{k}={v}" for k, v in model_kwargs.items())
+        print(f"Parameters: {params_str}")
     print(f"Validation training rows: {len(train)}")
     print(f"Validation rows: {len(val)}")
     print(f"Final training rows: {len(combined)}")
@@ -333,36 +216,9 @@ def run(model_path: str, model_kwargs: dict[str, Any] | None = None) -> None:
     print(f"Saved submission (id, {TARGET}) to: {output_path}")
 
 
-def _run_algorithm(name: str, argv: list[str] | None = None) -> None:
+def _run_algorithm(name: str, **kwargs: Any) -> None:
     try:
-        raw_args = list(sys.argv[1:] if argv is None else argv)
-        visualize = False
-        clean_args: list[str] = []
-        for arg in raw_args:
-            if arg in {"--visualize", "--video"}:
-                visualize = True
-            else:
-                clean_args.append(arg)
-
-        model_path = ALGORITHMS[name]
-        model_kwargs = _resolve_model_kwargs(model_path, argv=clean_args)
-        run(model_path, model_kwargs=model_kwargs)
-
-        if visualize:
-            if name != "logres":
-                raise ValueError("--visualize is currently only supported for 'logres'.")
-            from src.logres.visualize import generate_contour_video
-
-            vid_kwargs: dict[str, Any] = {}
-            if "learning_rate" in model_kwargs:
-                vid_kwargs["learning_rate"] = float(model_kwargs["learning_rate"])
-            if "max_iter" in model_kwargs:
-                vid_kwargs["max_iter"] = int(model_kwargs["max_iter"])
-            video_path = _with_spinner(
-                "Rendering contour video",
-                lambda: generate_contour_video(**vid_kwargs),
-            )
-            print(f"Saved contour video to: {video_path}")
+        run(ALGORITHMS[name], **kwargs)
     except (OSError, ValueError, TypeError) as err:
         raise SystemExit(f"Error running {name}: {err}") from err
 
@@ -384,24 +240,43 @@ def dtl_main() -> None:
 
 
 def svm_main() -> None:
-    _run_algorithm("svm")
+    parser = argparse.ArgumentParser(description="Evaluate SVM classifier and create a test submission.")
+    parser.add_argument("-c", "--c", type=float, default=1.0, help="Regularization parameter C (default: 1.0)")
+    parser.add_argument("--max-passes", type=int, default=3, help="Maximum iterations without change (default: 3)")
+    parser.add_argument("--tol", type=float, default=1e-3, help="Tolerance for stopping criterion (default: 1e-3)")
+    parser.add_argument(
+        "--kernel",
+        type=str,
+        default="linear",
+        choices=["linear", "poly", "rbf", "gaussian"],
+        help="Kernel type (default: linear)",
+    )
+    parser.add_argument("--degree", type=int, default=3, help="Degree of polynomial kernel (default: 3)")
+    parser.add_argument(
+        "--gamma",
+        type=str,
+        default="auto",
+        help="Kernel coefficient for 'rbf', 'poly', and 'gaussian' ('auto', 'scale', or float value; default: auto)",
+    )
+    parser.add_argument("--coef0", type=float, default=0.0, help="Independent term in poly kernel (default: 0.0)")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility (default: None)")
 
+    args = parser.parse_args()
 
-def main() -> None:
-    """CLI entrypoint supporting `python -m src.driver <algorithm> [params...]`."""
-    args = sys.argv[1:]
-    if not args or args[0] in {"-h", "--help"} and len(args) == 1:
-        available = ", ".join(ALGORITHMS.keys())
-        print(f"Usage: python -m src.driver <algorithm> [--param value | param=value ...]")
-        print(f"Available algorithms: {available}")
-        raise SystemExit(0)
+    gamma_val: Any = args.gamma
+    try:
+        gamma_val = float(args.gamma)
+    except ValueError:
+        pass
 
-    alg_name = args[0]
-    if alg_name not in ALGORITHMS:
-        available = ", ".join(ALGORITHMS.keys())
-        raise SystemExit(f"Unknown algorithm '{alg_name}'. Choose from: {available}")
-    _run_algorithm(alg_name, argv=args[1:])
-
-
-if __name__ == "__main__":
-    main()
+    kwargs = {
+        "c": args.c,
+        "max_passes": args.max_passes,
+        "tol": args.tol,
+        "kernel": args.kernel,
+        "degree": args.degree,
+        "gamma": gamma_val,
+        "coef0": args.coef0,
+        "seed": args.seed,
+    }
+    _run_algorithm("svm", **kwargs)
