@@ -46,7 +46,7 @@ class LogisticRegression:
             return self.reg_lambda * (l1_term + l2_term)
         return np.zeros_like(weights)
 
-    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> "LogisticRegression":
+    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> LogisticRegression:
         """Fit the model using Stochastic Gradient Ascent (SGA)."""
         X = np.asarray(X_train, dtype=float)
         y = np.asarray(y_train, dtype=float)
