@@ -24,7 +24,7 @@ class NaiveBayes:
         self.theta_: np.ndarray | None = None
         self.var_: np.ndarray | None = None
 
-    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> "NaiveBayes":
+    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> NaiveBayes:
         X = self._validate_features(X_train, "X_train")
         y = np.asarray(y_train)
         if y.ndim != 1:
