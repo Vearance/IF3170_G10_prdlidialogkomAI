@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import itertools
 import sys
@@ -32,7 +33,7 @@ ALGORITHMS = {
 }
 
 
-def _load_model(model_path: str) -> Any:
+def _load_model(model_path: str, **kwargs: Any) -> Any:
     """Load a model class specified as ``module.path:ClassName``."""
     try:
         module_path, class_name = model_path.split(":", maxsplit=1)
@@ -47,7 +48,7 @@ def _load_model(model_path: str) -> Any:
 
     if not callable(model_class):
         raise TypeError(f"'{model_path}' is not a callable model class.")
-    return model_class()
+    return model_class(**kwargs)
 
 
 def _features(data: pd.DataFrame, source: Path, *, require_target: bool) -> pd.DataFrame:
@@ -117,7 +118,7 @@ def _macro_f1_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(class_scores))
 
 
-def run(model_path: str) -> None:
+def run(model_path: str, **model_kwargs: Any) -> None:
     train = pd.read_csv(TRAIN_PATH)
     combined = pd.read_csv(COMBINED_PATH)
     val = pd.read_csv(VALIDATION_PATH)
@@ -150,7 +151,7 @@ def run(model_path: str) -> None:
                 f"Train: {expected_columns}; found: {features.columns.tolist()}."
             )
 
-    model = _load_model(model_path)
+    model = _load_model(model_path, **model_kwargs)
     _with_spinner(
         "Training model",
         lambda: model.fit(X_train.to_numpy(), train[TARGET].to_numpy()),
@@ -171,7 +172,7 @@ def run(model_path: str) -> None:
         val[TARGET].to_numpy(), val_predictions
     )
 
-    final_model = _load_model(model_path)
+    final_model = _load_model(model_path, **model_kwargs)
     _with_spinner(
         "Retraining on combined",
         lambda: final_model.fit(
@@ -199,6 +200,9 @@ def run(model_path: str) -> None:
     submission.to_csv(output_path, index=False)
 
     print(f"\nModel: {model_path}")
+    if model_kwargs:
+        params_str = ", ".join(f"{k}={v}" for k, v in model_kwargs.items())
+        print(f"Parameters: {params_str}")
     print(f"Validation training rows: {len(train)}")
     print(f"Validation rows: {len(val)}")
     print(f"Final training rows: {len(combined)}")
@@ -207,9 +211,9 @@ def run(model_path: str) -> None:
     print(f"Saved submission (id, {TARGET}) to: {output_path}")
 
 
-def _run_algorithm(name: str) -> None:
+def _run_algorithm(name: str, **kwargs: Any) -> None:
     try:
-        run(ALGORITHMS[name])
+        run(ALGORITHMS[name], **kwargs)
     except (OSError, ValueError, TypeError) as err:
         raise SystemExit(f"Error running {name}: {err}") from err
 
@@ -231,4 +235,43 @@ def dtl_main() -> None:
 
 
 def svm_main() -> None:
-    _run_algorithm("svm")
+    parser = argparse.ArgumentParser(description="Evaluate SVM classifier and create a test submission.")
+    parser.add_argument("-c", "--c", type=float, default=1.0, help="Regularization parameter C (default: 1.0)")
+    parser.add_argument("--max-passes", type=int, default=3, help="Maximum iterations without change (default: 3)")
+    parser.add_argument("--tol", type=float, default=1e-3, help="Tolerance for stopping criterion (default: 1e-3)")
+    parser.add_argument(
+        "--kernel",
+        type=str,
+        default="linear",
+        choices=["linear", "poly", "rbf", "gaussian"],
+        help="Kernel type (default: linear)",
+    )
+    parser.add_argument("--degree", type=int, default=3, help="Degree of polynomial kernel (default: 3)")
+    parser.add_argument(
+        "--gamma",
+        type=str,
+        default="auto",
+        help="Kernel coefficient for 'rbf', 'poly', and 'gaussian' ('auto', 'scale', or float value; default: auto)",
+    )
+    parser.add_argument("--coef0", type=float, default=0.0, help="Independent term in poly kernel (default: 0.0)")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility (default: None)")
+
+    args = parser.parse_args()
+
+    gamma_val: Any = args.gamma
+    try:
+        gamma_val = float(args.gamma)
+    except ValueError:
+        pass
+
+    kwargs = {
+        "c": args.c,
+        "max_passes": args.max_passes,
+        "tol": args.tol,
+        "kernel": args.kernel,
+        "degree": args.degree,
+        "gamma": gamma_val,
+        "coef0": args.coef0,
+        "seed": args.seed,
+    }
+    _run_algorithm("svm", **kwargs)
