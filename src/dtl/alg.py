@@ -64,7 +64,26 @@ class Cart:
     # === PRIVATE
     # fungsi yang dikustomisasi
     def _compute_sample_weights(self, y_idx: np.ndarray) -> np.ndarray:
-        ...
+        n_samples = len(y_idx)
+        if n_samples == 0: return np.array([], dtype=float)
+
+        if self.class_weight is None:
+            return np.ones(n_samples, dtype=float)
+
+        n_classes = len(self.classes_) if self.classes_ is not None else int(np.max(y_idx)) + 1
+
+        if self.class_weight == "balanced":
+            counts = np.bincount(y_idx, minlength=n_classes)
+            class_w = n_samples / (n_classes * np.maximum(counts, 1))
+            return class_w[y_idx]
+
+        if isinstance(self.class_weight, dict):
+            class_w = np.ones(n_classes, dtype=float)
+            for idx, cls_val in enumerate(self.classes_ if self.classes_ is not None else range(n_classes)):
+                class_w[idx] = float(self.class_weight.get(cls_val, 1.0))
+            return class_w[y_idx]
+
+        return np.ones(n_samples, dtype=float)
 
     # fungsi untuk train
     # fungsi pencarian impurity terkecil untuk numerik
@@ -160,8 +179,50 @@ class Cart:
 
     def _best_split(
             self, X: np.ndarray, y_idx: np.ndarray, sample_weight: np.ndarray
-        ) -> tuple[int | None, float | None, set[Any] | None, float]:
-            ...
+        ) -> tuple[int | None, float | None, set[Any] | None, bool, float]:
+        n_samples, n_features = X.shape
+        if n_samples < self.min_samples_split or n_samples < 2 * self.min_samples_leaf:
+            return None, None, None, True, 0.0
+
+        best_gain = 0.0
+        best_feat: int | None = None
+        best_thresh: float | None = None
+        best_cats: set[Any] | None = None
+        best_majority_left = True
+
+        for f_idx in range(n_features):
+            col = X[:, f_idx]
+
+            # cek apakah tipe numerik atau kategorikal
+            is_num = np.issubdtype(col.dtype, np.number)
+
+            # pembersihan
+            if not is_num:
+                non_missing = [v for v in col if not is_missing(v)]
+                is_num = len(non_missing) > 0 and all(isinstance(v, (int, float, np.number)) for v in non_missing)
+
+            if is_num:
+                thresh, _, gain = self._find_best_numeric(col, y_idx, sample_weight)
+                if thresh is not None and gain > best_gain:
+                    best_gain = gain
+                    best_feat = f_idx
+                    best_thresh = thresh
+                    best_cats = None
+                    valid = np.array([not is_missing(v) for v in col], dtype=bool)
+                    left_count = np.sum(col[valid].astype(float) <= thresh)
+                    best_majority_left = left_count >= (np.sum(valid) - left_count)
+            else:
+                cats, _, gain = self._find_best_categorical(col, y_idx, sample_weight)
+                if cats is not None and gain > best_gain:
+                    best_gain = gain
+                    best_feat = f_idx
+                    best_thresh = None
+                    best_cats = cats
+                    valid = np.array([not is_missing(v) for v in col], dtype=bool)
+                    left_count = sum(1 for v in col[valid] if v in cats)
+                    best_majority_left = left_count >= (np.sum(valid) - left_count)
+
+        return best_feat, best_thresh, best_cats, best_majority_left, best_gain
 
     def _build_tree(self, X: np.ndarray, y_idx: np.ndarray, sample_weight: np.ndarray, depth: int) -> _Node:
         ...
