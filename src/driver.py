@@ -32,6 +32,7 @@ ALGORITHMS = {
     "bayes": "src.bayes.alg:NaiveBayes",
     "dtl": "src.dtl.alg:DecisionTree",
     "svm": "src.svm.alg:SVM",
+    "svm_kelas": "src.svm.svm_kelas:SVMKelas",
 }
 
 
@@ -301,6 +302,13 @@ def dtl_main() -> None:
 
 def svm_main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate SVM classifier and create a test submission.")
+    parser.add_argument(
+        "--impl",
+        type=str,
+        default="keerthi",
+        choices=["keerthi", "kelas"],
+        help="SVM implementation: 'keerthi' (default) or 'kelas' (QP solver from PPT)",
+    )
     parser.add_argument("-c", "--c", type=float, default=1.0, help="Regularization parameter C (default: 1.0)")
     parser.add_argument("--max-passes", type=int, default=3, help="Maximum iterations without change (default: 3)")
     parser.add_argument("--tol", type=float, default=1e-3, help="Tolerance for stopping criterion (default: 1e-3)")
@@ -341,4 +349,49 @@ def svm_main() -> None:
         "seed": args.seed,
         "max_samples": args.max_samples,
     }
-    _run_algorithm("svm", **kwargs)
+    algo_key = "svm_kelas" if args.impl == "kelas" else "svm"
+    _run_algorithm(algo_key, **kwargs)
+
+
+def svm_kelas_main() -> None:
+    parser = argparse.ArgumentParser(description="Evaluate SVM Kelas (Slide PPT QP Solver) classifier and create a test submission.")
+    parser.add_argument("-c", "--c", type=float, default=1.0, help="Regularization parameter C (default: 1.0)")
+    parser.add_argument("--tol", type=float, default=1e-4, help="Tolerance for QP stopping criterion (default: 1e-4)")
+    parser.add_argument(
+        "--kernel",
+        type=str,
+        default="rbf",
+        choices=["linear", "poly", "rbf", "gaussian"],
+        help="Kernel type (default: rbf)",
+    )
+    parser.add_argument("--degree", type=int, default=3, help="Degree of polynomial kernel (default: 3)")
+    parser.add_argument(
+        "--gamma",
+        type=str,
+        default="scale",
+        help="Kernel coefficient ('auto', 'scale', or float value; default: scale)",
+    )
+    parser.add_argument("--coef0", type=float, default=0.0, help="Independent term in poly kernel (default: 0.0)")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility (default: None)")
+    parser.add_argument("--max-samples", type=int, default=1000, help="Max training samples for QP optimization (default: 1000)")
+
+    args = parser.parse_args()
+
+    gamma_val: Any = args.gamma
+    try:
+        gamma_val = float(args.gamma)
+    except ValueError:
+        pass
+
+    kwargs = {
+        "c": args.c,
+        "tol": args.tol,
+        "kernel": args.kernel,
+        "degree": args.degree,
+        "gamma": gamma_val,
+        "coef0": args.coef0,
+        "seed": args.seed,
+        "max_samples": args.max_samples,
+    }
+    _run_algorithm("svm_kelas", **kwargs)
+
