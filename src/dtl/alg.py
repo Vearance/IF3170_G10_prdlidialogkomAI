@@ -56,7 +56,14 @@ class Cart:
 
     # === PUBLIC
     def predict(self, X: np.ndarray) -> np.ndarray:
-        ...
+        if self.root_ is None:
+            raise ValueError("model belum di-fit. panggil fit() terlebih dahulu.")
+
+        X_arr = np.asarray(X)
+        if len(X_arr) == 0:
+            return np.array([])
+
+        return np.array([self._traverse(row, self.root_) for row in X_arr])
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> Self:
         X_arr = np.asarray(X)
@@ -305,7 +312,26 @@ class Cart:
 
     # prediksi test
     def _traverse(self, row: np.ndarray, node: _Node) -> Any:
-        ...
+        if node.is_leaf:
+            return node.value
+        
+        val = row[node.feature_index]
+        
+        if is_missing(val):
+            next_node = node.left if node.majority_go_left else node.right
+            return self._traverse(row, next_node if next_node is not None else node)
+
+        if node.threshold is not None:
+            if float(val) <= node.threshold:
+                return self._traverse(row, node.left if node.left is not None else node)
+            return self._traverse(row, node.right if node.right is not None else node)
+
+        if node.left_categories is not None:
+            if val in node.left_categories:
+                return self._traverse(row, node.left if node.left is not None else node)
+            return self._traverse(row, node.right if node.right is not None else node)
+
+        return node.value
 
     # algoritma ccp ketika tree sudah dibangun
     def _subtree_stats(self, node: _Node, total_weight: float) -> tuple[float, int]:
