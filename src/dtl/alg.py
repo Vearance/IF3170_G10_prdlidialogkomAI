@@ -59,7 +59,23 @@ class Cart:
         ...
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> Self:
-        ...
+        X_arr = np.asarray(X)
+        y_arr = np.asarray(y)
+
+        if len(y_arr) == 0: raise ValueError("data training tidak boleh kosong.")
+
+        self.classes_, y_idx = np.unique(y_arr, return_inverse=True)
+        self.n_features_ = X_arr.shape[1]
+
+        sample_weight = self._compute_sample_weights(y_idx)
+        total_w = float(np.sum(sample_weight))
+
+        self.root_ = self._build_tree(X_arr, y_idx, sample_weight, depth=0)
+
+        if self.ccp_alpha > 0.0 and self.root_ is not None:
+            self._prune(self.root_, total_w)
+
+        return self
 
     # === PRIVATE
     # fungsi yang dikustomisasi
@@ -225,7 +241,67 @@ class Cart:
         return best_feat, best_thresh, best_cats, best_majority_left, best_gain
 
     def _build_tree(self, X: np.ndarray, y_idx: np.ndarray, sample_weight: np.ndarray, depth: int) -> _Node:
-        ...
+        n_samples = len(y_idx)
+        n_classes = len(self.classes_) if self.classes_ is not None else int(np.max(y_idx)) + 1
+
+        class_w = np.bincount(y_idx, weights=sample_weight, minlength=n_classes)
+        w_node = float(np.sum(class_w))
+        prob = class_w / w_node if w_node > 0.0 else np.zeros(n_classes)
+
+        # nilai mayoritas untuk prediksi leaf
+        majority_idx = int(np.argmax(class_w))
+        majority_val = self.classes_[majority_idx] if self.classes_ is not None else majority_idx
+
+        gini = self._gini_index1(y_idx, sample_weight)
+        misc_error = float(w_node - class_w[majority_idx])
+
+        node = _Node(value=majority_val,weight_n=w_node,class_distribution=prob,
+            misclassification_error=misc_error,gini_impurity=gini,n_samples=n_samples)
+
+        if (
+            (self.max_depth is not None and depth >= self.max_depth)
+            or n_samples < self.min_samples_split
+            or n_samples < 2 * self.min_samples_leaf
+            or gini == 0.0
+        ):
+            return node
+
+        best_feat, best_thresh, best_cats, best_maj_left, best_gain = self._best_split(X, y_idx, sample_weight)
+        if best_feat is None or best_gain <= 0.0: return node
+
+        col = X[:, best_feat]
+        if best_thresh is not None: # fitur numerik
+            missing_mask = np.array([is_missing(v) for v in col], dtype=bool)
+            left_mask = np.zeros(n_samples, dtype=bool)
+            known_mask = ~missing_mask
+            if np.any(known_mask):
+                left_mask[known_mask] = col[known_mask].astype(float) <= best_thresh
+            left_mask[missing_mask] = best_maj_left
+        else: # fitur kategorikal
+            assert best_cats is not None
+            missing_mask = np.array([is_missing(v) for v in col], dtype=bool)
+            left_mask = np.zeros(n_samples, dtype=bool)
+            known_mask = ~missing_mask
+            if np.any(known_mask):
+                left_mask[known_mask] = np.array([v in best_cats for v in col[known_mask]], dtype=bool)
+            left_mask[missing_mask] = best_maj_left
+
+        right_mask = ~left_mask
+
+        # jika salah satu cabang kosong, jadikan leaf
+        if np.sum(left_mask) == 0 or np.sum(right_mask) == 0:
+            return node
+
+        node.feature_index = best_feat
+        node.threshold = best_thresh
+        node.left_categories = best_cats
+        node.majority_go_left = best_maj_left
+
+        # rekursi 
+        node.left = self._build_tree(X[left_mask], y_idx[left_mask], sample_weight[left_mask], depth + 1)
+        node.right = self._build_tree(X[right_mask], y_idx[right_mask], sample_weight[right_mask], depth + 1)
+
+        return node
 
     # prediksi test
     def _traverse(self, row: np.ndarray, node: _Node) -> Any:
@@ -258,12 +334,8 @@ class Cart:
 
     # fungsi Gini_Index(T,A)
     @staticmethod
-    def _gini_index2(
-            left_y: np.ndarray,
-            right_y: np.ndarray,
-            left_weight: np.ndarray | None = None,
-            right_weight: np.ndarray | None = None,
-        ) -> float:
+    def _gini_index2(left_y: np.ndarray, right_y: np.ndarray,
+            left_weight: np.ndarray | None = None, right_weight: np.ndarray | None = None) -> float:
         w_l = np.ones(len(left_y), dtype=float) if left_weight is None else np.asarray(left_weight, dtype=float)
         w_r = np.ones(len(right_y), dtype=float) if right_weight is None else np.asarray(right_weight, dtype=float)
 
