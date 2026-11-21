@@ -38,11 +38,11 @@ class _Node:
 class Cart:
     def __init__(
         self,
-        max_depth: int | None = None,
+        max_depth: int | None = 15,
         min_samples_split: int = 2,
-        min_samples_leaf: int = 1,
-        class_weight: dict[Any, float] | str | None = None,
-        ccp_alpha: float = 0.0,
+        min_samples_leaf: int = 2,
+        class_weight: dict[Any, float] | str | None = {0: 1.0, 1: 1.2},
+        ccp_alpha: float = 0.00010,
     ) -> None:
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
@@ -304,7 +304,7 @@ class Cart:
         node.left_categories = best_cats
         node.majority_go_left = best_maj_left
 
-        # rekursi 
+        # rekursi
         node.left = self._build_tree(X[left_mask], y_idx[left_mask], sample_weight[left_mask], depth + 1)
         node.right = self._build_tree(X[right_mask], y_idx[right_mask], sample_weight[right_mask], depth + 1)
 
@@ -314,9 +314,9 @@ class Cart:
     def _traverse(self, row: np.ndarray, node: _Node) -> Any:
         if node.is_leaf:
             return node.value
-        
+
         val = row[node.feature_index]
-        
+
         if is_missing(val):
             next_node = node.left if node.majority_go_left else node.right
             return self._traverse(row, next_node if next_node is not None else node)
@@ -335,13 +335,53 @@ class Cart:
 
     # algoritma ccp ketika tree sudah dibangun
     def _subtree_stats(self, node: _Node, total_weight: float) -> tuple[float, int]:
-        ...
+        if node.is_leaf:
+            err = (node.misclassification_error / total_weight) if total_weight > 0.0 else 0.0
+            return err, 1
 
-    def _find_weakest_link( self, node: _Node, total_weight: float) -> tuple[float, _Node | None]:
-        ...
+        err_l, leaves_l = self._subtree_stats(node.left, total_weight) if node.left is not None else (0.0, 0)
+        err_r, leaves_r = self._subtree_stats(node.right, total_weight) if node.right is not None else (0.0, 0)
+
+        return err_l + err_r, leaves_l + leaves_r
+
+    def _find_weakest_link(self, node: _Node, total_weight: float) -> tuple[float, _Node | None]:
+        if node.is_leaf: return float("inf"), None
+
+        # hitung error jika node ini dipangkas jadi leaf vs jika dibiarkan jadi subtree
+        r_t = (node.misclassification_error / total_weight) if total_weight > 0.0 else 0.0
+        r_tt, n_leaves = self._subtree_stats(node, total_weight)
+
+        alpha = (r_t - r_tt) / (n_leaves - 1) if n_leaves > 1 else float("inf")
+        weakest_node: _Node | None = node
+
+        # cek kiri
+        if node.left is not None and not node.left.is_leaf:
+            alpha_l, node_l = self._find_weakest_link(node.left, total_weight)
+            if alpha_l < alpha:
+                alpha = alpha_l
+                weakest_node = node_l
+
+        # cek kanan
+        if node.right is not None and not node.right.is_leaf:
+            alpha_r, node_r = self._find_weakest_link(node.right, total_weight)
+            if alpha_r < alpha:
+                alpha = alpha_r
+                weakest_node = node_r
+
+        return alpha, weakest_node
 
     def _prune(self, root: _Node, total_weight: float) -> None:
-        ...
+        while not root.is_leaf:
+            alpha, weakest = self._find_weakest_link(root, total_weight)
+            if weakest is None or alpha > self.ccp_alpha:
+                break
+
+            # pangkas node terlemah menjadi leaf
+            weakest.left = None
+            weakest.right = None
+            weakest.feature_index = None
+            weakest.threshold = None
+            weakest.left_categories = None
 
     # fungsi Gini_Index(T)
     @staticmethod
@@ -372,3 +412,7 @@ class Cart:
 
         return float((sum_l / total) * Cart._gini_index1(left_y, w_l)
             + (sum_r / total) * Cart._gini_index1(right_y, w_r))
+
+
+# alias buat src/driver.py
+DecisionTree = Cart
