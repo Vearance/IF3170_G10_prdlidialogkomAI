@@ -1,292 +1,443 @@
-import random
-from collections.abc import Callable
-from functools import partial
-from typing import Self
+from __future__ import annotations
+
+from typing import Any, Self
 
 import numpy as np
+# https://github.com/maik-nack/SMO/blob/master/SVM.py
+# https://www.researchgate.net/publication/2446719_Improvements_to_Platt's_SMO_Algorithm_for_SVM_Classifier_Design
+# https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr-98-14.pdf
 
-
-def linear_kernel(x_i: np.ndarray, x_j: np.ndarray) -> float:
-    return float(x_i @ x_j)
-
-
-def polynomial_kernel(x_i: np.ndarray, x_j: np.ndarray, degree: int, gamma: float, coef0: float) -> float:
-    return float((gamma * (x_i @ x_j) + coef0) ** degree)
-
-
-def gaussian_kernel(x_i: np.ndarray, x_j: np.ndarray, gamma: float) -> float:
-    return float(np.exp(-gamma * np.sum((x_i - x_j) ** 2)))
-
-
-def linear_kernel_matrix(X: np.ndarray, x: np.ndarray) -> np.ndarray:
-    return X @ x
-
-
-def polynomial_kernel_matrix(X: np.ndarray, x: np.ndarray, degree: int, gamma: float, coef0: float) -> np.ndarray:
-    return (gamma * (X @ x) + coef0) ** degree
-
-
-def gaussian_kernel_matrix(X: np.ndarray, x: np.ndarray, gamma: float) -> np.ndarray:
-    return np.exp(-gamma * np.sum((X - x) ** 2, axis=-1))
-
-
-#https://awstip.com/support-vector-machines-svms-a-beginners-guide-54e5c7913fc8
-#https://cs229.stanford.edu/materials/smo.pdf
 class SVM:
-    def __init__(self,
-                c: float = 1,
-                max_passes : int = 3,
-                tol : float = 1e-3,
-                kernel : str = "linear",
-                degree : int = 3,
-                gamma : str | float = 'auto',
-                coef0 : float = 0,
-                seed = None
-                ):
-        self.c = c
-        self.tol = tol
-        self.max_passes = max_passes
-        
-        self.kernel = kernel
-        self.degree = degree
+    def __init__(
+        self,
+        c: float = 1.0,
+        kernel: str = "rbf",
+        degree: int = 3,
+        gamma: float | str = "scale",
+        coef0: float = 0.0,
+        tol: float = 1e-3,
+        max_passes: int | None = 10,
+        seed: int | None = None,
+        max_samples: int | None = None,
+    ) -> None:
+        self.c = float(c)
+        self.kernel = kernel.lower()
+        if self.kernel == "gaussian":
+            self.kernel = "rbf"
+        self.degree = int(degree)
         self.gamma = gamma
-        self.coef0 = coef0
-
+        self.coef0 = float(coef0)
+        self.tol = float(tol)
+        self.max_passes = max_passes
         self.seed = seed
+        self.max_samples = max_samples
 
-        self.alphas: np.ndarray | None = None
-        self.bias: float = 0.0
-        self.X_train: np.ndarray | None = None
-        self.Y_train: np.ndarray | None = None
-        self._kernel_fn: Callable[[np.ndarray, np.ndarray], float] | None = None
-        self._kernel_matrix_fn: Callable[[np.ndarray, np.ndarray], np.ndarray] | None = None
-        self._errors_cache: np.ndarray | None = None
+        self.eps = 1e-7
+        self.gamma_value: float = 1.0
+        self.alphas: np.ndarray = np.empty(0, dtype=np.float64)
+        self.f_cache: np.ndarray = np.empty(0, dtype=np.float64)
+        self.i_low: int = 0
+        self.i_up: int = 0
+        self.b_low: float = 1.0
+        self.b_up: float = -1.0
+
+        self.i_0: np.ndarray = np.empty(0, dtype=bool)
+        self.i_1: np.ndarray = np.empty(0, dtype=bool)
+        self.i_2: np.ndarray = np.empty(0, dtype=bool)
+        self.i_3: np.ndarray = np.empty(0, dtype=bool)
+        self.i_4: np.ndarray = np.empty(0, dtype=bool)
+
+        self.coef: np.ndarray = np.empty(0, dtype=np.float64)
+        self.dual_coef: np.ndarray = np.empty(0, dtype=np.float64)
+        self.threshold: float = 0.0
+        self.support: np.ndarray = np.empty(0, dtype=np.int64)
+        self.support_vectors: np.ndarray = np.empty((0, 0), dtype=np.float64)
+        self.classes_: np.ndarray = np.empty(0)
 
     def fit(self, X_train: np.ndarray, Y_train: np.ndarray) -> Self:
-        self.X_train = X_train
-        self.Y_train = np.where(Y_train == 0, -1, 1).astype(np.float64)
-        self.rng = random.Random(self.seed)
-        self._setup_kernel(X_train)
+        classes = np.unique(Y_train)
+        if len(classes) != 2:
+            raise ValueError(
+                f"Binary classification requires 2 classes, got: {classes}"
+            )
+        self.classes_ = classes
 
-        m = X_train.shape[0]
-        self.alphas = np.zeros(m, dtype=np.float64)
-        self.bias = 0.0
-        self._errors_cache = -self.Y_train.copy()
-        passes = 0
+        x_mat = np.asarray(X_train, dtype=np.float64)
+        y_vec = np.where(Y_train == classes[1], 1.0, -1.0).astype(np.float64)
 
-        while (passes < self.max_passes):
-            num_changed_alphas = 0
-            for i in range(m):
-                E_i = self._errors_cache[i]
-                if self._violates_kkt(self.Y_train[i], E_i, self.alphas[i]):
-                    j = self._random_not_equal_to(i, m)
-                    E_j = self._errors_cache[j]
+        if self.max_samples is not None and len(x_mat) > self.max_samples:
+            rng = np.random.default_rng(self.seed)
+            sub_indices = rng.choice(
+                len(x_mat), size=self.max_samples, replace=False
+            )
+            x_mat = x_mat[sub_indices]
+            y_vec = y_vec[sub_indices]
 
-                    alpha_i_old = self.alphas[i]
-                    alpha_j_old = self.alphas[j]
+        x_mat, y_vec, max_iter = self._initialize_fitting(x_mat, y_vec)
+        iteration = 0
+        num_changed = 0
+        examine_all = True
 
-                    L = self._compute_alpha_lowerbound(
-                        self.Y_train[i], self.Y_train[j], alpha_i_old, alpha_j_old
-                    )
-                    H = self._compute_alpha_upperbound(
-                        self.Y_train[i], self.Y_train[j], alpha_i_old, alpha_j_old
-                    )
-
-                    if L == H:
-                        continue
-
-                    eta = self._compute_dual_objective_second_derivative(
-                        X_train[i], X_train[j]
-                    )
-                    if eta >= 0:
-                        continue
-
-                    self.alphas[j] = self._compute_optimal_alpha_j(
-                        alpha_j_old, self.Y_train[j], E_i, E_j, eta, L, H
-                    )
-                    if abs(self.alphas[j] - alpha_j_old) < 1e-5:
-                        continue
-
-                    self.alphas[i] = self._compute_first_alpha_from_second(
-                        alpha_i_old, alpha_j_old, self.alphas[j], self.Y_train[i], self.Y_train[j]
-                    )
-                    b1 = self._compute_first_bias_candidate(
-                        X_train[i], X_train[j],
-                        self.Y_train[i], self.Y_train[j],
-                        alpha_i_old, alpha_j_old,
-                        self.alphas[i], self.alphas[j],
-                        E_i,
-                    )
-                    b2 = self._compute_second_bias_candidate(
-                        X_train[i], X_train[j],
-                        self.Y_train[i], self.Y_train[j],
-                        alpha_i_old, alpha_j_old,
-                        self.alphas[i], self.alphas[j],
-                        E_j,
-                    )
-
-                    bias_old = self.bias
-                    self.bias = self._resolve_bias_threshold(
-                        b1, b2, self.alphas[i], self.alphas[j]
-                    )
-                    self._update_error_cache(
-                        X_train, i, j, alpha_i_old, alpha_j_old, bias_old
-                    )
-                    num_changed_alphas += 1
-            if num_changed_alphas == 0:
-                passes += 1
+        while num_changed > 0 or examine_all:
+            num_changed = 0
+            if examine_all:
+                for i in range(y_vec.shape[0]):
+                    num_changed += self.examine_example(i, x_mat, y_vec)
             else:
-                passes = 0
+                while True:
+                    inner_success = self.take_step(
+                        self.i_up, self.i_low, x_mat, y_vec
+                    )
+                    num_changed += int(inner_success)
+                    if (
+                        self.b_up > self.b_low - 2.0 * self.tol
+                        or not inner_success
+                    ):
+                        break
+                num_changed = 0
+
+            if examine_all:
+                examine_all = False
+            elif num_changed == 0:
+                examine_all = True
+
+            iteration += 1
+            if iteration >= max_iter:
+                break
+
+        self._set_fitted_results(x_mat, y_vec)
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        scores = np.array([self._compute_decision_value(x) for x in X])
-        return np.where(scores >= 0, 1, 0)
+        if self.classes_.size < 2:
+            raise ValueError("Model is not fitted yet.")
+        decisions = self.decision_function(X)
+        return np.where(decisions >= 0.0, self.classes_[1], self.classes_[0])
 
-    def _setup_kernel(self, X: np.ndarray):
-        gamma_value = self._resolve_gamma(X)
+    def decision_function(self, X: np.ndarray) -> np.ndarray:
+        x_mat = np.asarray(X, dtype=np.float64)
+        if self.kernel == "linear" and self.coef.size > 0:
+            return x_mat @ self.coef - self.threshold
+
+        scores = np.zeros(len(x_mat), dtype=np.float64)
+        batch_size = 2000
+        for i in range(0, len(x_mat), batch_size):
+            end = min(i + batch_size, len(x_mat))
+            k_batch = self._compute_kernel(x_mat[i:end], self.support_vectors)
+            scores[i:end] = k_batch @ self.dual_coef
+
+        return scores - self.threshold
+
+    def examine_example(self, i2: int, x: np.ndarray, y: np.ndarray) -> int:
+        if self.i_0[i2]:
+            f2 = float(self.f_cache[i2])
+        else:
+            f2 = self._compute_f(x, y, i2)
+            self.f_cache[i2] = f2
+            if (self.i_1[i2] or self.i_2[i2]) and f2 < self.b_up:
+                self.b_up = f2
+                self.i_up = i2
+            elif (self.i_3[i2] or self.i_4[i2]) and f2 > self.b_low:
+                self.b_low = f2
+                self.i_low = i2
+
+        optimality = True
+        i1 = 0
+        if (
+            self.i_0[i2] or self.i_1[i2] or self.i_2[i2]
+        ) and self.b_low - f2 > 2.0 * self.tol:
+            optimality = False
+            i1 = self.i_low
+
+        if (
+            self.i_0[i2] or self.i_3[i2] or self.i_4[i2]
+        ) and f2 - self.b_up > 2.0 * self.tol:
+            optimality = False
+            i1 = self.i_up
+
+        if optimality:
+            return 0
+
+        if self.i_0[i2]:
+            if self.b_low - f2 > f2 - self.b_up:
+                i1 = self.i_low
+            else:
+                i1 = self.i_up
+
+        return 1 if self.take_step(i1, i2, x, y) else 0
+
+    def take_step(self, i1: int, i2: int, x: np.ndarray, y: np.ndarray) -> bool:
+        if i1 == i2:
+            return False
+
+        y1 = float(y[i1])
+        y2 = float(y[i2])
+        alpha1 = float(self.alphas[i1])
+        alpha2 = float(self.alphas[i2])
+        f1 = float(self.f_cache[i1])
+        f2 = float(self.f_cache[i2])
+        s = y1 * y2
+
+        low, high = compute_box_bounds(y1, y2, alpha1, alpha2, self.c)
+        if abs(low - high) < self.eps:
+            return False
+
+        k11 = float(self._compute_kernel(x[i1 : i1 + 1], x[i1 : i1 + 1])[0, 0])
+        k12 = float(self._compute_kernel(x[i1 : i1 + 1], x[i2 : i2 + 1])[0, 0])
+        k22 = float(self._compute_kernel(x[i2 : i2 + 1], x[i2 : i2 + 1])[0, 0])
+        eta = 2.0 * k12 - k11 - k22
+
+        if eta < -self.eps:
+            a2 = compute_unconstrained_alpha2(alpha2, y2, f1, f2, eta, low, high)
+        else:
+            a2 = evaluate_endpoint_objective(
+                y1, y2, f1, f2, alpha1, alpha2, s, k11, k12, k22, low, high, self.eps
+            )
+
+        if abs(a2 - alpha2) < self.eps * (a2 + alpha2 + self.eps):
+            return False
+
+        a1 = alpha1 + s * (alpha2 - a2)
+
+        if np.any(self.i_0):
+            ki1 = self._compute_kernel(x[self.i_0], x[i1 : i1 + 1]).ravel()
+            ki2 = self._compute_kernel(x[self.i_0], x[i2 : i2 + 1]).ravel()
+            self.f_cache[self.i_0] += (
+                y1 * (a1 - alpha1) * ki1 + y2 * (a2 - alpha2) * ki2
+            )
+
+        self.alphas[i1] = a1
+        self.alphas[i2] = a2
+        self._update_index_sets(i1, y1, a1)
+        self._update_index_sets(i2, y2, a2)
+
+        self.f_cache[i1] = (
+            f1 + y1 * (a1 - alpha1) * k11 + y2 * (a2 - alpha2) * k12
+        )
+        self.f_cache[i2] = (
+            f2 + y1 * (a1 - alpha1) * k12 + y2 * (a2 - alpha2) * k22
+        )
+
+        i_low_mask = self.i_0.copy()
+        i_up_mask = self.i_0.copy()
+        self._update_i_low_up_mask(i_low_mask, i_up_mask, i1)
+        self._update_i_low_up_mask(i_low_mask, i_up_mask, i2)
+
+        self.b_low, self.i_low = self._get_extreme_bound(i_low_mask, np.argmax)
+        self.b_up, self.i_up = self._get_extreme_bound(i_up_mask, np.argmin)
+        return True
+
+    def _initialize_fitting(self, x: np.ndarray, y: np.ndarray) -> tuple[np.ndarray, np.ndarray, int]:
+        n_samples = y.shape[0]
+        self.alphas = np.zeros(n_samples, dtype=np.float64)
+        self.f_cache = np.zeros(n_samples, dtype=np.float64)
+
+        y1_mask = y == 1.0
+        self.i_1 = y1_mask.copy()
+        self.i_up = int(y1_mask.nonzero()[0][0])
+        self.b_up = -1.0
+
+        y2_mask = y == -1.0
+        self.i_4 = y2_mask.copy()
+        self.i_low = int(y2_mask.nonzero()[0][0])
+        self.b_low = 1.0
+
+        self.f_cache[self.i_low] = 1.0
+        self.f_cache[self.i_up] = -1.0
+
+        self.i_0 = np.zeros(n_samples, dtype=bool)
+        self.i_2 = np.zeros(n_samples, dtype=bool)
+        self.i_3 = np.zeros(n_samples, dtype=bool)
+
+        self.gamma_value = self._resolve_gamma(x)
+        max_iter = (
+            self.max_passes
+            if (self.max_passes is not None and self.max_passes > 0)
+            else 100
+        )
+        return x, y, max_iter
+
+    def _set_fitted_results(self, x: np.ndarray, y: np.ndarray) -> None:
+        self.support = np.where(self.alphas > self.eps)[0]
+        self.support_vectors = x[self.support]
+        self.dual_coef = self.alphas[self.support] * y[self.support]
+        self.threshold = (self.b_low + self.b_up) / 2.0
+
         if self.kernel == "linear":
-            self._kernel_fn = linear_kernel
-            self._kernel_matrix_fn = linear_kernel_matrix
-        elif self.kernel == "poly":
-            self._kernel_fn = partial(
-                polynomial_kernel,
-                degree=self.degree,
-                gamma=gamma_value,
-                coef0=self.coef0
-            )
-            self._kernel_matrix_fn = partial(
-                polynomial_kernel_matrix,
-                degree=self.degree,
-                gamma=gamma_value,
-                coef0=self.coef0
-            )
-        elif self.kernel in ("rbf", "gaussian"):
-            self._kernel_fn = partial(
-                gaussian_kernel,
-                gamma=gamma_value
-            )
-            self._kernel_matrix_fn = partial(
-                gaussian_kernel_matrix,
-                gamma=gamma_value
+            self.coef = np.sum(
+                self.dual_coef[:, None] * self.support_vectors, axis=0
             )
 
-    def _resolve_gamma(self, X: np.ndarray) -> float:
-        n_features = X.shape[1]
+    def _compute_f(self, x: np.ndarray, y: np.ndarray, i: int) -> float:
+        supp = np.where(self.alphas > self.eps)[0]
+        if len(supp) == 0:
+            return -float(y[i])
+
+        k_row = self._compute_kernel(x[i : i + 1], x[supp]).ravel()
+        margin = float(np.dot(k_row, self.alphas[supp] * y[supp]))
+        return margin - float(y[i])
+
+    def _update_index_sets(self, i: int, y: float, alpha: float) -> None:
+        if self.i_0[i]:
+            self.i_0[i] = False
+        elif y == 1.0:
+            if self.i_1[i]:
+                self.i_1[i] = False
+            else:
+                self.i_3[i] = False
+        else:
+            if self.i_2[i]:
+                self.i_2[i] = False
+            else:
+                self.i_4[i] = False
+
+        if alpha <= self.eps or alpha >= self.c - self.eps:
+            if y == 1.0:
+                if alpha <= self.eps:
+                    self.i_1[i] = True
+                else:
+                    self.i_3[i] = True
+            else:
+                if alpha <= self.eps:
+                    self.i_4[i] = True
+                else:
+                    self.i_2[i] = True
+        else:
+            self.i_0[i] = True
+
+    def _update_i_low_up_mask(
+        self, i_low_mask: np.ndarray, i_up_mask: np.ndarray, i: int
+    ) -> None:
+        if self.i_3[i] or self.i_4[i]:
+            i_low_mask[i] = True
+        else:
+            i_up_mask[i] = True
+
+    def _get_extreme_bound(
+        self, mask: np.ndarray, argfunc: Any
+    ) -> tuple[float, int]:
+        indices = np.where(mask)[0]
+        f_vals = self.f_cache[indices]
+        best_pos = int(argfunc(f_vals))
+        best_idx = int(indices[best_pos])
+        best_val = float(self.f_cache[best_idx])
+        return best_val, best_idx
+
+    def _compute_kernel(self, x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
+        if self.kernel == "linear":
+            return linear_kernel(x1, x2)
+        if self.kernel == "rbf":
+            return rbf_kernel(x1, x2, self.gamma_value)
+        if self.kernel == "poly":
+            return polynomial_kernel(
+                x1, x2, self.degree, self.coef0, self.gamma_value
+            )
+        raise ValueError(f"Unknown kernel type: '{self.kernel}'")
+
+    def _resolve_gamma(self, x: np.ndarray) -> float:
         if isinstance(self.gamma, (int, float)):
             return float(self.gamma)
+        n_features = x.shape[1]
         if self.gamma == "auto":
             return 1.0 / n_features
-        elif self.gamma == "scale":
-            return 1.0 / (n_features * float(X.var()))
-        raise ValueError("Gamma must be 'auto', 'scale', or a numeric float")
-
-    def _update_error_cache(
-        self, X_train: np.ndarray,
-        i: int, j: int,
-        alpha_i_old: float, alpha_j_old: float,
-        bias_old: float) -> None:
-        assert self._kernel_matrix_fn is not None
-        assert self.alphas is not None
-        assert self.Y_train is not None
-        assert self._errors_cache is not None
-        k_all_i = self._kernel_matrix_fn(X_train, X_train[i])
-        k_all_j = self._kernel_matrix_fn(X_train, X_train[j])
-        delta_E = (
-            (self.alphas[i] - alpha_i_old) * self.Y_train[i] * k_all_i
-            + (self.alphas[j] - alpha_j_old) * self.Y_train[j] * k_all_j
-            + (self.bias - bias_old)
-        )
-        self._errors_cache += delta_E
-
-    def _compute_decision_value(self, x: np.ndarray) -> float:
-        assert self.alphas is not None
-        sv = np.where(self.alphas > 0)[0]
-        if len(sv) == 0:
-            return self.bias
-        
-        assert self._kernel_matrix_fn is not None
-        assert self.X_train is not None
-        assert self.Y_train is not None
-        kernel_values = self._kernel_matrix_fn(self.X_train[sv], x)
-        return float(np.sum(self.alphas[sv] * self.Y_train[sv] * kernel_values) + self.bias)
-
-    def _compute_alpha_lowerbound(self, y_i: float, y_j: float,
-                                alpha_i: float, alpha_j: float) -> float:
-        if y_i != y_j:
-            return max(0.0, alpha_j - alpha_i)
-        return max(0, alpha_i + alpha_j - self.c)
-
-    def _compute_alpha_upperbound(self, y_i: float, y_j: float,
-                                alpha_i: float, alpha_j: float) -> float:
-        if y_i != y_j:
-            return min(self.c, self.c + alpha_j - alpha_i)
-        return min(self.c, alpha_i + alpha_j)
-
-    def _violates_kkt(self, y_i : float, E_i: float, alpha_i: float) -> bool:
-        return ((y_i * E_i < - self.tol and alpha_i < self.c) or (y_i * E_i > self.tol and alpha_i > 0))
-                
-    def _random_not_equal_to(self, i : int, upper_limit:int) -> int:
-        j = self.rng.randrange(upper_limit - 1)
-        if j < i:
-            return j
-        return j + 1
-    
-    def _compute_dual_objective_second_derivative(self, x_i: np.ndarray, x_j: np.ndarray) -> float:
-        assert self._kernel_fn is not None
-        return 2 * self._kernel_fn(x_i, x_j) - self._kernel_fn(x_i, x_i) - self._kernel_fn(x_j, x_j)
-
-    def _compute_optimal_alpha_j(self, alpha_j_old: float, y_j: float,
-                            error_i: float, error_j: float, eta: float,
-                            lower_bound: float, upper_bound: float) -> float:
-        unclipped_alpha_j = alpha_j_old - (y_j * (error_i - error_j)) / eta
-
-        if unclipped_alpha_j > upper_bound:
-            return upper_bound
-        if unclipped_alpha_j < lower_bound:
-            return lower_bound
-        return unclipped_alpha_j
+        if self.gamma == "scale":
+            variance = float(x.var())
+            return 1.0 / (n_features * variance) if variance > self.eps else 1.0
+        raise ValueError(f"Unsupported gamma specification: '{self.gamma}'")
 
 
-    def _compute_first_alpha_from_second(self,
-            alpha_i_old: float,
-            alpha_j_old: float, alpha_j_new: float,
-            y_i: float, y_j: float,
-        ) -> float:
-        return alpha_i_old + y_i * y_j * (alpha_j_old - alpha_j_new)
+def compute_box_bounds(
+    y1: float, y2: float, alpha1: float, alpha2: float, c: float
+) -> tuple[float, float]:
+    if y1 != y2:
+        low = max(0.0, alpha2 - alpha1)
+        high = min(c, c + alpha2 - alpha1)
+    else:
+        low = max(0.0, alpha2 + alpha1 - c)
+        high = min(c, alpha2 + alpha1)
+    return low, high
 
-    def _compute_first_bias_candidate(self,
-            x_i: np.ndarray, x_j: np.ndarray,
-            y_i: float, y_j: float,
-            alpha_i_old: float, alpha_j_old: float,
-            alpha_i_new: float, alpha_j_new: float,
-            error_i: float,
-        ) -> float:
-        assert self._kernel_fn is not None
-        return float(
-            self.bias - error_i
-            - y_i * (alpha_i_new - alpha_i_old) * self._kernel_fn(x_i, x_i)
-            - y_j * (alpha_j_new - alpha_j_old) * self._kernel_fn(x_i, x_j)
-        )
 
-    def _compute_second_bias_candidate(self,
-            x_i: np.ndarray, x_j: np.ndarray,
-            y_i: float, y_j: float,
-            alpha_i_old: float, alpha_j_old: float,
-            alpha_i_new: float, alpha_j_new: float,
-            error_j: float,
-        ) -> float:
-        assert self._kernel_fn is not None
-        return float(
-            self.bias - error_j
-            - y_i * (alpha_i_new - alpha_i_old) * self._kernel_fn(x_i, x_j)
-            - y_j * (alpha_j_new - alpha_j_old) * self._kernel_fn(x_j, x_j)
-        )
+def compute_unconstrained_alpha2(
+    alpha2: float,
+    y2: float,
+    f1: float,
+    f2: float,
+    eta: float,
+    low: float,
+    high: float,
+) -> float:
+    new_alpha2 = alpha2 - y2 * (f1 - f2) / eta
+    if new_alpha2 < low:
+        return low
+    if new_alpha2 > high:
+        return high
+    return new_alpha2
 
-    def _resolve_bias_threshold(self, b1: float, b2: float,
-                            alpha_i_new: float, alpha_j_new: float) -> float:
-        if 0.0 < alpha_i_new < self.c:
-            return b1
-        if 0.0 < alpha_j_new < self.c:
-            return b2
-        return (b1 + b2) / 2.0
+
+def evaluate_endpoint_objective(
+    y1: float,
+    y2: float,
+    f1: float,
+    f2: float,
+    alpha1: float,
+    alpha2: float,
+    s: float,
+    k11: float,
+    k12: float,
+    k22: float,
+    low: float,
+    high: float,
+    eps: float = 1e-7,
+) -> float:
+    f1_term = y1 * f1 - alpha1 * k11 - s * alpha2 * k12
+    f2_term = y2 * f2 - s * alpha1 * k12 - alpha2 * k22
+    l1 = alpha1 + s * (alpha2 - low)
+    h1 = alpha1 + s * (alpha2 - high)
+    psi_l = (
+        l1 * f1_term
+        + low * f2_term
+        + 0.5 * (l1**2) * k11
+        + 0.5 * (low**2) * k22
+        + s * low * l1 * k12
+    )
+    psi_h = (
+        h1 * f1_term
+        + high * f2_term
+        + 0.5 * (h1**2) * k11
+        + 0.5 * (high**2) * k22
+        + s * high * h1 * k12
+    )
+
+    if psi_l < psi_h - eps:
+        return low
+    if psi_l > psi_h + eps:
+        return high
+    return alpha2
+
+
+def linear_kernel(x1: np.ndarray, x2: np.ndarray) -> np.ndarray:
+    x1_mat = np.atleast_2d(x1)
+    x2_mat = np.atleast_2d(x2)
+    return x1_mat @ x2_mat.T
+
+
+def rbf_kernel(x1: np.ndarray, x2: np.ndarray, gamma: float) -> np.ndarray:
+    x1_mat = np.atleast_2d(x1)
+    x2_mat = np.atleast_2d(x2)
+    x1_norm = np.sum(x1_mat**2, axis=1, keepdims=True)
+    x2_norm = np.sum(x2_mat**2, axis=1, keepdims=True)
+    sq_dist = x1_norm + x2_norm.T - 2.0 * (x1_mat @ x2_mat.T)
+    return np.exp(-gamma * np.maximum(sq_dist, 0.0))
+
+
+def polynomial_kernel(
+    x1: np.ndarray,
+    x2: np.ndarray,
+    degree: int,
+    coef0: float,
+    gamma: float = 1.0,
+) -> np.ndarray:
+    x1_mat = np.atleast_2d(x1)
+    x2_mat = np.atleast_2d(x2)
+    return (gamma * (x1_mat @ x2_mat.T) + coef0) ** degree

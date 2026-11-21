@@ -320,6 +320,7 @@ def svm_main() -> None:
     )
     parser.add_argument("--coef0", type=float, default=0.0, help="Independent term in poly kernel (default: 0.0)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility (default: None)")
+    parser.add_argument("--max-samples", type=int, default=None, help="Max training samples to subsample (default: None for full data)")
 
     args = parser.parse_args()
 
@@ -338,5 +339,6 @@ def svm_main() -> None:
         "gamma": gamma_val,
         "coef0": args.coef0,
         "seed": args.seed,
+        "max_samples": args.max_samples,
     }
     _run_algorithm("svm", **kwargs)
