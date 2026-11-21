@@ -1,5 +1,5 @@
 # === Visualisasi Decision Tree (ASCII) ===
-# Panggil di sini ya bung.
+# Panggil fungsi dari sini ya bung.
 
 # import
 from typing import Any
@@ -53,17 +53,17 @@ def print_tree(model: Cart, top_n: int = 3, feature_names: list[str] | None = No
             msg = "model belum di-fit."
             print(msg)
             return msg
-    
+
         header = "=" * 60 + f"\nCART (Top-{top_n})\n" + "=" * 60
         body = _render_ascii(model.root_, feature_names, top_n)
         full_text = f"{header}\n{body}\n{'=' * 60}\n"
-    
+
         print(full_text)
-    
+
         if save_path is not None:
             out = Path(save_path)
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(full_text, encoding="utf-8")
             print(f"visualisasi berhasil disimpan ke: {out}")
-    
+
         return full_text
