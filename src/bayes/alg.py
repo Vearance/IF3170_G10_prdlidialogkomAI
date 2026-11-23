@@ -39,7 +39,7 @@ class NaiveBayes:
         self.feature_parents_: dict[int, int | None] | None = None
         self.cpts_: list[np.ndarray] | None = None
 
-    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> "NaiveBayes":
+    def fit(self, X_train: np.ndarray, y_train: np.ndarray) -> NaiveBayes:
         X = np.asarray(X_train, dtype=float)
         y = np.asarray(y_train)
 
