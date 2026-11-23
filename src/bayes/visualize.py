@@ -34,7 +34,7 @@ def generate_bayes_structure_plot(
     n_bins: int = 5,
     n_features: int | None = 15,
     learn_structure: bool = True,
-    output_dir: Path = Path("output"),
+    output_dir: Path = Path("output/viz"),
 ) -> Path:
     """Fit Bayes on training data and save a graph of class-feature relations."""
     train_df = pd.read_csv(TRAIN_PATH)

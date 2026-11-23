@@ -115,7 +115,7 @@ def generate_contour_video(
     feature_name: str = "pca3",
     learning_rate: float = 0.08,
     max_iter: int = 120,
-    output_dir: Path = Path("output"),
+    output_dir: Path = Path("output/viz"),
     fps: int = 15,
 ) -> Path:
     """Train 1-feature Logistic Regression and render log-loss contour + trajectory .avi video."""

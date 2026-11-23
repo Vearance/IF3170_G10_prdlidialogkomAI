@@ -26,6 +26,7 @@ TEST_PATH = Path("data/clean/test.csv")
 
 OUTPUT_DIR = Path("output")
 MODEL_DIR = OUTPUT_DIR / "models"
+VIZ_DIR = OUTPUT_DIR / "viz"
 TARGET = "is_canceled"
 IGNORED_COLUMNS = ["id"]
 ALGORITHMS = {
@@ -362,12 +363,31 @@ def logres_main() -> None:
     parser.add_argument("--neg-weight", type=float, default=1.0)
     parser.add_argument("--pos-weight", type=float, default=1.0)
     parser.add_argument("--random-state", type=int, default=42)
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Generate a log-loss contour and training trajectory video.",
+    )
     args = parser.parse_args()
 
     kwargs = vars(args)
+    visualize = kwargs.pop("visualize")
     if kwargs["penalty"] == "none":
         kwargs["penalty"] = None
     _run_algorithm("logres", **kwargs)
+
+    if visualize:
+        from src.logres.visualize import generate_contour_video
+
+        video_path = _with_spinner(
+            "Rendering Logistic Regression contour video",
+            lambda: generate_contour_video(
+                learning_rate=args.learning_rate,
+                max_iter=args.max_iter,
+                output_dir=VIZ_DIR,
+            ),
+        )
+        print(f"Saved Logistic Regression visualization to: {video_path}")
 
 
 def bayes_main() -> None:
@@ -406,7 +426,7 @@ def bayes_main() -> None:
 
         vis_path = _with_spinner(
             "Rendering Bayesian network plot",
-            lambda: generate_bayes_structure_plot(**kwargs),
+            lambda: generate_bayes_structure_plot(**kwargs, output_dir=VIZ_DIR),
         )
         print(f"Saved Bayesian network visualization to: {vis_path}")
 
@@ -425,8 +445,35 @@ def dtl_main() -> None:
         help="Class weights as a dictionary, 'balanced', or 'none'.",
     )
     parser.add_argument("--ccp-alpha", type=float, default=0.00010)
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Print and save an ASCII visualization of the fitted decision tree.",
+    )
     args = parser.parse_args()
-    _run_algorithm("dtl", **vars(args))
+    model_kwargs = vars(args)
+    visualize = model_kwargs.pop("visualize")
+    _run_algorithm("dtl", **model_kwargs)
+
+    if visualize:
+        from src.dtl.visualize import print_tree
+
+        train = pd.read_csv(TRAIN_PATH)
+        X_train = _features(train, TRAIN_PATH, require_target=True)
+        visualization_model = _load_model(ALGORITHMS["dtl"], **model_kwargs)
+        _with_spinner(
+            "Training visualization tree",
+            lambda: visualization_model.fit(
+                X_train.to_numpy(), train[TARGET].to_numpy()
+            ),
+        )
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        visualization_path = VIZ_DIR / f"dtl_tree_{timestamp}.txt"
+        print_tree(
+            visualization_model,
+            feature_names=X_train.columns.tolist(),
+            save_path=visualization_path,
+        )
 
 
 def svm_main() -> None:
@@ -501,6 +548,7 @@ def svm_main() -> None:
                 coef0=args.coef0,
                 max_passes=args.max_passes,
                 tol=args.tol,
+                output_dir=VIZ_DIR,
             ),
         )
         print(f"Saved SVM visualization to: {vis_path}")

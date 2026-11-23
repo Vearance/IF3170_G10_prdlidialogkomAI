@@ -27,7 +27,7 @@ def _sample_stratified(
 def generate_svm_kernel_plots(
     features: tuple[str, str] | None = None,
     n_per_class: int = 120,
-    output_dir: Path = Path("output"),
+    output_dir: Path = Path("output/viz"),
     seed: int = 42,
     kernel: str | None = None,
     c: float = 1.0,
