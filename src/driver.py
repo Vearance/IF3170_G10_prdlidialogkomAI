@@ -323,7 +323,17 @@ def _run_algorithm(name: str, **kwargs: Any) -> None:
 
 
 def knn_main() -> None:
-    _run_algorithm("knn")
+    parser = argparse.ArgumentParser(
+        description="Evaluate K-Nearest Neighbors and create a test submission."
+    )
+    parser.add_argument("--n-neighbors", type=int, default=7)
+    parser.add_argument(
+        "--weights", choices=["uniform", "distance"], default="distance"
+    )
+    args = parser.parse_args()
+    _run_algorithm(
+        "knn", n_neighbors=args.n_neighbors, weights=args.weights
+    )
 
 
 def logres_main() -> None:
