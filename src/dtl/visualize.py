@@ -2,6 +2,8 @@
 # Panggil fungsi dari sini ya bung.
 
 # import
+from __future__ import annotations
+
 from pathlib import Path
 
 from src.dtl.alg import DecisionTree, _Node
