@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+
 from src.bayes.alg import NaiveBayes
 from src.driver import TARGET, TRAIN_PATH
 
@@ -53,8 +54,7 @@ def generate_bayes_structure_plot(
         raise RuntimeError("Model must be fitted before generating the graph.")
 
     selected_names = [
-        feature_names[original_index]
-        for original_index in model.selected_features_
+        feature_names[original_index] for original_index in model.selected_features_
     ]
     n_features = len(selected_names)
     n_columns = min(5, n_features)

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 
 
@@ -61,7 +63,7 @@ class NaiveBayes:
         X_binned = X_binned_all[:, selected_features]
 
         feature_parents = self._learn_dag_structure(
-            X_binned, class_indices, n_classes, selected_features
+            X_binned, class_indices, n_classes
         )
         cpts = self._fit_cpts(X_binned, class_indices, n_classes, feature_parents)
 
@@ -74,6 +76,16 @@ class NaiveBayes:
         return self
 
     def predict_log_joint_proba(self, X: np.ndarray) -> np.ndarray:
+        if (
+            self.classes_ is None
+            or self.class_prior_ is None
+            or self.selected_features_ is None
+            or self.bin_edges_ is None
+            or self.feature_parents_ is None
+            or self.cpts_ is None
+        ):
+            raise ValueError("Model must be fitted before calling predict.")
+
         X_arr = np.asarray(X, dtype=float)
         X_binned = self._apply_bins(
             X_arr[:, self.selected_features_],
@@ -115,6 +127,9 @@ class NaiveBayes:
         return np.exp(self.predict_log_proba(X))
 
     def predict(self, X: np.ndarray) -> np.ndarray:
+        if self.classes_ is None:
+            raise ValueError("Model must be fitted before calling predict.")
+
         if len(self.classes_) == 2 and self.decision_threshold is not None:
             probabilities = self.predict_proba(X)[:, 1]
             return self.classes_[
@@ -127,7 +142,6 @@ class NaiveBayes:
         X_binned: np.ndarray,
         class_indices: np.ndarray,
         n_classes: int,
-        selected_features: np.ndarray,
     ) -> dict[int, int | None]:
         k = X_binned.shape[1]
         parents: dict[int, int | None] = {i: None for i in range(k)}
@@ -252,7 +266,7 @@ class NaiveBayes:
         return scores
 
     def _fit_bin_edges(self, X: np.ndarray) -> list[np.ndarray]:
-        edges = []
+        edges: list[np.ndarray] = []
         for feature_index in range(X.shape[1]):
             values = X[:, feature_index]
             unique_values = np.unique(values)
@@ -272,7 +286,7 @@ class NaiveBayes:
         X: np.ndarray,
         bin_edges: list[np.ndarray],
     ) -> np.ndarray:
-        X_binned = np.empty(X.shape, dtype=np.int16)
+        X_binned: np.ndarray = np.empty(X.shape, dtype=np.int16)
         for feature_index, edges in enumerate(bin_edges):
             X_binned[:, feature_index] = np.searchsorted(
                 edges,
