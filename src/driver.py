@@ -66,6 +66,15 @@ def _parse_float_tuple(raw: str) -> tuple[float, ...]:
         raise argparse.ArgumentTypeError("Tuple values must be numbers.") from err
 
 
+def _parse_optional_int(raw: str) -> int | None:
+    if raw.strip().lower() in {"none", "null"}:
+        return None
+    try:
+        return int(raw)
+    except ValueError as err:
+        raise argparse.ArgumentTypeError("Enter an integer or 'none'.") from err
+
+
 def _features(data: pd.DataFrame, source: Path, *, require_target: bool) -> pd.DataFrame:
     if require_target and TARGET not in data.columns:
         raise ValueError(f"Target column '{TARGET}' was not found in '{source}'.")
@@ -292,7 +301,44 @@ def logres_main() -> None:
 
 
 def bayes_main() -> None:
-    _run_algorithm("bayes")
+    parser = argparse.ArgumentParser(
+        description="Evaluate Naive Bayes and create a test submission."
+    )
+    parser.add_argument("--alpha", type=float, default=1.5)
+    parser.add_argument("--threshold", type=float, default=0.475)
+    parser.add_argument("--n-bins", type=int, default=5)
+    parser.add_argument("--n-features", type=_parse_optional_int, default=15)
+    parser.add_argument(
+        "--learn-structure",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Learn TAN-style feature dependencies (use --no-learn-structure for Naive Bayes)",
+    )
+    parser.add_argument(
+        "--visualize",
+        "--kak_aku_mw_gambarnya_boleh_gk",
+        action="store_true",
+        help="Generate a graph of relationships between class and features",
+    )
+    args = parser.parse_args()
+
+    kwargs = {
+        "alpha": args.alpha,
+        "decision_threshold": args.threshold,
+        "n_bins": args.n_bins,
+        "n_features": args.n_features,
+        "learn_structure": args.learn_structure,
+    }
+    _run_algorithm("bayes", **kwargs)
+
+    if args.visualize:
+        from src.bayes.visualize import generate_bayes_structure_plot
+
+        vis_path = _with_spinner(
+            "Rendering Bayesian network plot",
+            lambda: generate_bayes_structure_plot(**kwargs),
+        )
+        print(f"Saved Bayesian network visualization to: {vis_path}")
 
 
 def dtl_main() -> None:
