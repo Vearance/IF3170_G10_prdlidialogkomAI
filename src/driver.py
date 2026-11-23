@@ -329,6 +329,11 @@ def svm_main() -> None:
     parser.add_argument("--coef0", type=float, default=0.0, help="Independent term in poly kernel (default: 0.0)")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility (default: None)")
     parser.add_argument("--max-samples", type=int, default=None, help="Max training samples to subsample (default: None for full data)")
+    parser.add_argument(
+        "--visualize",
+        action="store_true",
+        help="Generate 2D decision boundary, margin, and support vector plots (Linear, Poly, Gaussian)",
+    )
 
     args = parser.parse_args()
 
@@ -351,6 +356,25 @@ def svm_main() -> None:
     }
     algo_key = "svm_kelas" if args.impl == "kelas" else "svm"
     _run_algorithm(algo_key, **kwargs)
+
+    if args.visualize:
+        from src.svm.visualize import generate_svm_kernel_plots
+
+        vis_seed = 42 if args.seed is None else args.seed
+        vis_path = _with_spinner(
+            "Rendering SVM kernel plot",
+            lambda: generate_svm_kernel_plots(
+                seed=vis_seed,
+                kernel=args.kernel,
+                c=args.c,
+                degree=args.degree,
+                gamma=gamma_val,
+                coef0=args.coef0,
+                max_passes=args.max_passes,
+                tol=args.tol,
+            ),
+        )
+        print(f"Saved SVM visualization to: {vis_path}")
 
 
 def svm_kelas_main() -> None:
