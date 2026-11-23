@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Self
 
 import numpy as np
+
 # https://github.com/maik-nack/SMO/blob/master/SVM.py
 # https://www.researchgate.net/publication/2446719_Improvements_to_Platt's_SMO_Algorithm_for_SVM_Classifier_Design
 # https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr-98-14.pdf

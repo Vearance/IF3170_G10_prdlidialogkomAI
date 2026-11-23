@@ -2,9 +2,10 @@
 # Panggil fungsi dari sini ya bung.
 
 # import
-from typing import Any
 from pathlib import Path
-from src.dtl.alg import Cart, _Node
+
+from src.dtl.alg import DecisionTree, _Node
+
 
 # ===== UTILS
 def _render_ascii(node: _Node | None, feature_names: list[str] | None,
@@ -47,14 +48,14 @@ def _render_ascii(node: _Node | None, feature_names: list[str] | None,
     return "\n".join(lines)
 
 # === PUBLIC
-def print_tree(model: Cart, top_n: int = 3, feature_names: list[str] | None = None,
+def print_tree(model: DecisionTree, top_n: int = 3, feature_names: list[str] | None = None,
     save_path: str | Path | None = None) -> str:
         if model.root_ is None:
             msg = "model belum di-fit."
             print(msg)
             return msg
 
-        header = "=" * 60 + f"\nCART (Top-{top_n})\n" + "=" * 60
+        header = "=" * 60 + f"\nDecisionTree / CART (Top-{top_n})\n" + "=" * 60
         body = _render_ascii(model.root_, feature_names, top_n)
         full_text = f"{header}\n{body}\n{'=' * 60}\n"
 

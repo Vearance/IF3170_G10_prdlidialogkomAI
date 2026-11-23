@@ -1,9 +1,8 @@
-# === Implementasi algoritma CART ===
-
-# import
-import numpy as np
-from typing import Any, Self
 from dataclasses import dataclass
+from typing import Any, Self
+
+import numpy as np
+
 
 # ===== UTILS
 def is_missing(val: Any) -> bool:
@@ -35,7 +34,7 @@ class _Node:
     def is_leaf(self) -> bool:
         return self.left is None and self.right is None
 
-class Cart:
+class DecisionTree:
     def __init__(
         self,
         max_depth: int | None = 15,
@@ -410,9 +409,6 @@ class Cart:
         total = sum_l + sum_r
         if total <= 0.0: return 0.0
 
-        return float((sum_l / total) * Cart._gini_index1(left_y, w_l)
-            + (sum_r / total) * Cart._gini_index1(right_y, w_r))
+        return float((sum_l / total) * DecisionTree._gini_index1(left_y, w_l)
+            + (sum_r / total) * DecisionTree._gini_index1(right_y, w_r))
 
-
-# alias buat src/driver.py
-DecisionTree = Cart

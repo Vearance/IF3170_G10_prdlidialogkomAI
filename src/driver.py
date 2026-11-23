@@ -67,6 +67,37 @@ def _parse_float_tuple(raw: str) -> tuple[float, ...]:
         raise argparse.ArgumentTypeError("Tuple values must be numbers.") from err
 
 
+def _parse_optional_int(raw: str) -> int | None:
+    if raw.strip().lower() in {"none", "null"}:
+        return None
+    try:
+        return int(raw)
+    except ValueError as err:
+        raise argparse.ArgumentTypeError("Enter an integer or 'none'.") from err
+
+
+def _parse_class_weight(raw: str) -> dict[Any, float] | str | None:
+    text = raw.strip()
+    if text.lower() in {"none", "null"}:
+        return None
+    if text.lower() == "balanced":
+        return "balanced"
+    try:
+        weights = ast.literal_eval(text)
+    except (ValueError, SyntaxError) as err:
+        raise argparse.ArgumentTypeError(
+            "Enter 'balanced', 'none', or a dictionary such as '{0: 1.0, 1: 1.2}'."
+        ) from err
+    if not isinstance(weights, dict):
+        raise argparse.ArgumentTypeError(
+            "class-weight must be 'balanced', 'none', or a dictionary."
+        )
+    try:
+        return {label: float(weight) for label, weight in weights.items()}
+    except (TypeError, ValueError) as err:
+        raise argparse.ArgumentTypeError("Dictionary weights must be numeric.") from err
+
+
 def _features(data: pd.DataFrame, source: Path, *, require_target: bool) -> pd.DataFrame:
     if require_target and TARGET not in data.columns:
         raise ValueError(f"Target column '{TARGET}' was not found in '{source}'.")
@@ -297,7 +328,21 @@ def bayes_main() -> None:
 
 
 def dtl_main() -> None:
-    _run_algorithm("dtl")
+    parser = argparse.ArgumentParser(
+        description="Evaluate Decision Tree and create a test submission."
+    )
+    parser.add_argument("--max-depth", type=_parse_optional_int, default=15)
+    parser.add_argument("--min-samples-split", type=int, default=2)
+    parser.add_argument("--min-samples-leaf", type=int, default=2)
+    parser.add_argument(
+        "--class-weight",
+        type=_parse_class_weight,
+        default={0: 1.0, 1: 1.2},
+        help="Class weights as a dictionary, 'balanced', or 'none'.",
+    )
+    parser.add_argument("--ccp-alpha", type=float, default=0.00010)
+    args = parser.parse_args()
+    _run_algorithm("dtl", **vars(args))
 
 
 def svm_main() -> None:
