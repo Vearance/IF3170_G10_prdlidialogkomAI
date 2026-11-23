@@ -1,4 +1,4 @@
-# Tubes 2 AI
+# Tubes 2 AI - prdlidialogkomAI
 
 Uses [uv](https://docs.astral.sh/uv/) to manage Python env and packages.
 
@@ -23,18 +23,16 @@ uv run dtl
 uv run svm
 ```
 
-## command examples
+## complete command examples for params
 
 - [KNN](src/knn/README.md)
 - [Logistic Regression](src/logres/README.md)
 - [Naive Bayes](src/bayes/README.md)
-- [Decision Tree](src/dtl/README.md#command-examples)
+- [Decision Tree](src/dtl/README.md#param-command-examples)
 - [SVM](src/svm/README.md)
 
 
 ## predict using loaded model
-
-To predict with a saved model, run the command below.
 
 ```bash
 uv run predict <model-name>.pkl
