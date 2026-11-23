@@ -28,3 +28,9 @@
 ```bash
 uv run dtl --max-depth 12 --min-samples-split 4 --min-samples-leaf 2 --class-weight balanced --ccp-alpha 0.001
 ```
+
+## visualize command
+
+```bash
+uv run dtl --visualize
+```
