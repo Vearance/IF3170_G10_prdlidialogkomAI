@@ -6,6 +6,7 @@ import argparse
 import ast
 import importlib
 import itertools
+import pickle
 import re
 import sys
 import threading
@@ -24,6 +25,7 @@ VALIDATION_PATH = Path("data/clean/val.csv")
 TEST_PATH = Path("data/clean/test.csv")
 
 OUTPUT_DIR = Path("output")
+MODEL_DIR = OUTPUT_DIR / "models"
 TARGET = "is_canceled"
 IGNORED_COLUMNS = ["id"]
 ALGORITHMS = {
@@ -53,18 +55,6 @@ def _load_model(model_path: str, **kwargs: Any) -> Any:
         raise TypeError(f"'{model_path}' is not a callable model class.")
     return model_class(**kwargs)
 
-
-def _parse_float_tuple(raw: str) -> tuple[float, ...]:
-    try:
-        values = ast.literal_eval(raw)
-    except (ValueError, SyntaxError) as err:
-        raise argparse.ArgumentTypeError("Enter a tuple, e.g. '(0.05, 0.15)'.") from err
-    if not isinstance(values, (tuple, list)):
-        raise argparse.ArgumentTypeError("Enter a tuple, e.g. '(0.05, 0.15)'.")
-    try:
-        return tuple(float(value) for value in values)
-    except (TypeError, ValueError) as err:
-        raise argparse.ArgumentTypeError("Tuple values must be numbers.") from err
 
 
 def _parse_optional_int(raw: str) -> int | None:
@@ -262,8 +252,12 @@ def run(model_path: str, **model_kwargs: Any) -> None:
     )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = OUTPUT_DIR / _submission_filename(model_path, model_kwargs, timestamp)
+    model_output_path = MODEL_DIR / output_path.with_suffix(".pkl").name
+    with model_output_path.open("wb") as model_file:
+        pickle.dump(final_model, model_file, protocol=pickle.HIGHEST_PROTOCOL)
     submission.to_csv(output_path, index=False)
 
     print(f"\nModel: {model_path}")
@@ -275,6 +269,49 @@ def run(model_path: str, **model_kwargs: Any) -> None:
     print(f"Final training rows: {len(combined)}")
     print(f"Validation Macro F1: {macro_f1:.4f}")
     print(f"Test predictions: {len(test_predictions)}")
+    print(f"Saved model pickle to: {model_output_path}")
+    print(f"Saved submission (id, {TARGET}) to: {output_path}")
+
+
+def run_saved_model(model_filename: str) -> None:
+    """Load a trusted pickle from output/models and predict the test data."""
+    filename = Path(model_filename)
+    if filename.name != model_filename or filename.suffix.lower() != ".pkl":
+        raise ValueError("Provide only a .pkl filename located in output/models.")
+
+    models_root = MODEL_DIR.resolve()
+    model_path = (MODEL_DIR / filename).resolve()
+    if models_root not in model_path.parents:
+        raise ValueError("The model file must be inside output/models.")
+    if not model_path.is_file():
+        raise FileNotFoundError(f"Saved model was not found: {model_path}")
+
+    with model_path.open("rb") as model_file:
+        model = _with_spinner("Loading saved model", lambda: pickle.load(model_file))
+    if not callable(getattr(model, "predict", None)):
+        raise TypeError(f"Saved object in '{model_path}' does not provide predict().")
+
+    test = pd.read_csv(TEST_PATH)
+    X_test = _features(test, TEST_PATH, require_target=False)
+    predictions = np.asarray(
+        _with_spinner(
+            "Predicting test",
+            lambda: model.predict(X_test.to_numpy()),
+        )
+    )
+    if predictions.shape != (len(test),):
+        raise ValueError(
+            "predict() must return one prediction per test row; "
+            f"got shape {predictions.shape}, expected {(len(test),)}."
+        )
+
+    submission = pd.DataFrame({"id": test["id"].to_numpy(), TARGET: predictions})
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = OUTPUT_DIR / f"{model_path.stem}_prediction_{timestamp}.csv"
+    submission.to_csv(output_path, index=False)
+    print(f"Loaded model: {model_path}")
+    print(f"Test predictions: {len(predictions)}")
     print(f"Saved submission (id, {TARGET}) to: {output_path}")
 
 
@@ -304,8 +341,8 @@ def logres_main() -> None:
     parser.add_argument("--continuous-cols", type=int, default=14)
     parser.add_argument("--pca-cols", type=int, default=12)
     parser.add_argument("--n-landmarks", type=int, default=0)
-    parser.add_argument("--rbf-gammas", type=_parse_float_tuple, default=(0.05, 0.15, 0.35))
-    parser.add_argument("--cont-rbf-gammas", type=_parse_float_tuple, default=(0.08, 0.25))
+    parser.add_argument("--rbf-gamma", type=float, default=0.15)
+    parser.add_argument("--cont-rbf-gamma", type=float, default=0.25)
     parser.add_argument("--n-estimators", type=int, default=1)
     parser.add_argument("--beta1", type=float, default=0.9)
     parser.add_argument("--beta2", type=float, default=0.999)
@@ -457,6 +494,21 @@ def svm_main() -> None:
             ),
         )
         print(f"Saved SVM visualization to: {vis_path}")
+
+
+def run_saved_model_main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run a saved model pickle from output/models on the test data."
+    )
+    parser.add_argument(
+        "model_filename",
+        help="Pickle filename inside output/models (for example: knn_20260101_120000.pkl).",
+    )
+    args = parser.parse_args()
+    try:
+        run_saved_model(args.model_filename)
+    except (OSError, ValueError, TypeError, pickle.PickleError, EOFError) as err:
+        raise SystemExit(f"Error running saved model: {err}") from err
 
 
 def svm_kelas_main() -> None:

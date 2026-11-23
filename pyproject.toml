@@ -1,7 +1,7 @@
 [project]
 name = "if3170-g10-prdlidialogkomai"
 version = "0.1.0"
-description = "Add your description here"
+description = "speacial thanks to Lyn Lapid for singing 'poster boy' 5 hours straight lol"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
@@ -17,6 +17,7 @@ logres = "src.driver:logres_main"
 bayes = "src.driver:bayes_main"
 dtl = "src.driver:dtl_main"
 svm = "src.driver:svm_main"
+predict = "src.driver:run_saved_model_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
