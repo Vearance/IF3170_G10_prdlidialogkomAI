@@ -21,3 +21,10 @@
 
 ## Penggunaan AI
 > Pada bagian source code untuk CART, AI hanya dimanfaatkan dalam pencarian sumber.
+
+
+## command examples
+
+```bash
+uv run dtl --max-depth 12 --min-samples-split 4 --min-samples-leaf 2 --class-weight balanced --ccp-alpha 0.001
+```
