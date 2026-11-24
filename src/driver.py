@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import hashlib
 import importlib
 import itertools
 import pickle
@@ -159,7 +160,12 @@ def _submission_filename(
         for name, value in sorted(model_kwargs.items())
     ]
     suffix = f"_{'_'.join(parameter_parts)}" if parameter_parts else ""
-    return f"{model_name}{suffix}_{timestamp}.csv"
+    filename = f"{model_name}{suffix}_{timestamp}.csv"
+    if len(filename) > 120:
+        digest = hashlib.sha256(suffix.encode("utf-8")).hexdigest()[:8]
+        short_suffix = suffix[:72].rstrip("-._")
+        filename = f"{model_name}{short_suffix}_{digest}_{timestamp}.csv"
+    return filename
 
 
 def _macro_f1_score(y_true: np.ndarray, y_pred: np.ndarray) -> float:
