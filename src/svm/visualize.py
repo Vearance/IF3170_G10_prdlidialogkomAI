@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -40,17 +41,13 @@ def generate_svm_kernel_plots(
     """Train SVM on 2D features and save decision boundary, margin, and support vector plot(s)"""
     train_df = pd.read_csv(TRAIN_PATH)
     if features is None:
-        top_two = (
-            train_df.corr(numeric_only=True)[TARGET]
-            .drop(TARGET)
-            .abs()
-            .sort_values(ascending=False)
-            .index[:2]
-            .tolist()
-        )
-        features = (top_two[0], top_two[1])
+        corr_series = pd.Series(train_df.corr(numeric_only=True)[TARGET]).drop(TARGET).abs()
+        top_two = [str(col) for col in corr_series.nlargest(2).index]
+        resolved_features: tuple[str, str] = (top_two[0], top_two[1])
+    else:
+        resolved_features = features
 
-    X_full = train_df[list(features)].to_numpy(dtype=float)
+    X_full = train_df[list(resolved_features)].to_numpy(dtype=float)
     y_full = train_df[TARGET].to_numpy(dtype=int)
 
     X_sub, y_sub = _sample_stratified(X_full, y_full, n_per_class=n_per_class, seed=seed)
@@ -73,27 +70,27 @@ def generate_svm_kernel_plots(
     grid_raw = np.column_stack([xx.ravel(), yy.ravel()])
     grid_scaled = (grid_raw - x_mean) / x_std
 
-    all_kernels: dict[str, tuple[str, dict]] = {
+    all_kernels: dict[str, tuple[str, dict[str, Any]]] = {
         "linear": (
             f"Linear Kernel (C={c})",
-            dict(c=c, kernel="linear", max_passes=max_passes, tol=tol, seed=seed),
+            {"c": c, "kernel": "linear", "max_passes": max_passes, "tol": tol, "seed": seed},
         ),
         "poly": (
             f"Polynomial Kernel (deg={degree}, gamma={gamma}, C={c})",
-            dict(
-                c=c,
-                kernel="poly",
-                degree=degree,
-                gamma=gamma,
-                coef0=coef0,
-                max_passes=max_passes,
-                tol=tol,
-                seed=seed,
-            ),
+            {
+                "c": c,
+                "kernel": "poly",
+                "degree": degree,
+                "gamma": gamma,
+                "coef0": coef0,
+                "max_passes": max_passes,
+                "tol": tol,
+                "seed": seed,
+            },
         ),
         "rbf": (
             f"Gaussian (RBF) Kernel (gamma={gamma}, C={c})",
-            dict(c=c, kernel="gaussian", gamma=gamma, max_passes=max_passes, tol=tol, seed=seed),
+            {"c": c, "kernel": "gaussian", "gamma": gamma, "max_passes": max_passes, "tol": tol, "seed": seed},
         ),
     }
 
@@ -113,7 +110,7 @@ def generate_svm_kernel_plots(
     )
     axes = [axes_raw] if n_plots == 1 else list(axes_raw)
     fig.suptitle(
-        f"SVM Decision Boundary, Margins, and Support Vectors ({features[0]} vs {features[1]})",
+        f"SVM Decision Boundary, Margins, and Support Vectors ({resolved_features[0]} vs {resolved_features[1]})",
         fontsize=13.5,
         fontweight="bold",
     )
@@ -170,13 +167,13 @@ def generate_svm_kernel_plots(
             )
 
         ax.set_title(title, fontsize=11.5, fontweight="bold")
-        ax.set_xlabel(features[0])
+        ax.set_xlabel(resolved_features[0])
         ax.set_xlim(x0_min - pad0, x0_max + pad0)
         ax.set_ylim(x1_min - pad1, x1_max + pad1)
         ax.grid(True, linestyle=":", alpha=0.4)
         ax.legend(loc="upper right", fontsize=8, framealpha=0.9)
 
-    axes[0].set_ylabel(features[1])
+    axes[0].set_ylabel(resolved_features[1])
     plt.tight_layout()
 
     output_dir.mkdir(parents=True, exist_ok=True)
