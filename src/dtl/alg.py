@@ -10,6 +10,17 @@ import numpy as np
 def is_missing(val: Any) -> bool:
     return val is None or (isinstance(val, (float, np.floating)) and np.isnan(val))
 
+def valid_mask(col: np.ndarray) -> np.ndarray:
+    if np.issubdtype(col.dtype, np.floating): return ~np.isnan(col)
+    if np.issubdtype(col.dtype, np.integer): return np.ones(len(col), dtype=bool)
+    return np.array([not is_missing(v) for v in col], dtype=bool)
+
+def is_numeric_col(col: np.ndarray) -> bool:
+    if np.issubdtype(col.dtype, np.number): return True
+    non_missing = [v for v in col if not is_missing(v)]
+    return len(non_missing) > 0 and all( isinstance(v, (int, float, np.number)) and not isinstance(v, bool)
+        for v in non_missing)
+
 # ===== STRUCTURE
 @dataclass
 class _Node:
@@ -44,12 +55,16 @@ class DecisionTree:
         min_samples_leaf: int = 2,
         class_weight: dict[Any, float] | str | None = {0: 1.0, 1: 1.2},
         ccp_alpha: float = 0.00010,
+        max_surrogates: int = 5,
     ) -> None:
+        if max_surrogates < 0:
+            raise ValueError("max_surrogates harus >= 0.")
         self.max_depth = max_depth
         self.min_samples_split = min_samples_split
         self.min_samples_leaf = min_samples_leaf
         self.class_weight = class_weight
         self.ccp_alpha = ccp_alpha
+        self.max_surrogates = max_surrogates
 
         self.classes_: np.ndarray | None = None
         self.n_features_: int | None = None
@@ -201,6 +216,111 @@ class DecisionTree:
 
             return best_left, best_weighted_gini, best_gain
 
+    # fungsi pencarian surrogate terbaik untuk numerik
+    def _find_surrogate_numeric(
+            self, col_valid: np.ndarray, target_left: np.ndarray, sample_weight: np.ndarray,
+            tot_true: float, tot_false: float
+        ) -> tuple[float | None, bool, float]:
+            x_vals = col_valid.astype(float)
+            order = np.argsort(x_vals, kind="quicksort")
+            x_sorted = x_vals[order]
+            if x_sorted[0] == x_sorted[-1]: return None, True, -1.0
+
+            left_sorted = target_left[order]
+            w_sorted = sample_weight[order]
+            valid_pos = np.flatnonzero(x_sorted[:-1] != x_sorted[1:])
+            if len(valid_pos) == 0: return None, True, -1.0
+
+            # hitung kecocokan kedua arah (normal: <= ke kiri, reverse: <= ke kanan) via cumsum
+            cum_left_true = np.cumsum(np.where(left_sorted, w_sorted, 0.0))[:-1]
+            cum_left_false = np.cumsum(np.where(~left_sorted, w_sorted, 0.0))[:-1]
+            agree_normal = (cum_left_true + (tot_false - cum_left_false))[valid_pos]
+            agree_reverse = (cum_left_false + (tot_true - cum_left_true))[valid_pos]
+
+            idx_norm = int(np.argmax(agree_normal))
+            idx_rev = int(np.argmax(agree_reverse))
+            if float(agree_normal[idx_norm]) >= float(agree_reverse[idx_rev]):
+                best_agree = float(agree_normal[idx_norm])
+                split_pos = int(valid_pos[idx_norm])
+                go_left = True
+            else:
+                best_agree = float(agree_reverse[idx_rev])
+                split_pos = int(valid_pos[idx_rev])
+                go_left = False
+
+            low = float(x_sorted[split_pos])
+            high = float(x_sorted[split_pos + 1])
+            thresh = low + 0.5 * (high - low)
+            if not np.isfinite(thresh) or thresh >= high:
+                thresh = low
+            return thresh, go_left, best_agree
+
+    # fungsi pencarian surrogate terbaik untuk kategorikal
+    def _find_surrogate_categorical(
+            self, col_valid: np.ndarray, target_left: np.ndarray, sample_weight: np.ndarray
+        ) -> tuple[set[Any] | None, float]:
+            categories = sorted(set(col_valid.tolist()), key=str)
+            if len(categories) < 2: return None, -1.0
+
+            left_cats: set[Any] = set()
+            best_agree = 0.0
+            for cat in categories:
+                cat_mask = col_valid == cat
+                w_cat_true = float(np.sum(sample_weight[cat_mask & target_left]))
+                w_cat_false = float(np.sum(sample_weight[cat_mask & ~target_left]))
+                if w_cat_true >= w_cat_false:
+                    left_cats.add(cat)
+                    best_agree += w_cat_true
+                else:
+                    best_agree += w_cat_false
+
+            if len(left_cats) == 0 or len(left_cats) == len(categories):
+                return None, -1.0
+            return left_cats, best_agree
+
+    # fungsi pencarian daftar surrogate terbaik (Breiman 1984)
+    def _find_surrogates(
+            self, X: np.ndarray, primary_feat: int, primary_valid: np.ndarray,
+            primary_left: np.ndarray, sample_weight: np.ndarray
+        ) -> list[tuple[int, float | set[Any], bool]]:
+            if self.max_surrogates == 0: return []
+
+            n_features = X.shape[1]
+            candidates: list[tuple[float, int, float | set[Any], bool]] = []
+
+            for f_idx in range(n_features):
+                if f_idx == primary_feat: continue
+
+                col = X[:, f_idx]
+                both_valid = primary_valid & valid_mask(col)
+                if not np.any(both_valid): continue
+
+                target_left = primary_left[both_valid]
+                w_valid = sample_weight[both_valid]
+                tot_true = float(np.sum(w_valid[target_left]))
+                tot_false = float(np.sum(w_valid[~target_left]))
+                p_min = min(tot_true, tot_false)
+                maj_agree = max(tot_true, tot_false)
+                if p_min <= 0.0: continue
+
+                if is_numeric_col(col):
+                    split_val, go_left, best_agree = self._find_surrogate_numeric(
+                        col[both_valid], target_left, w_valid, tot_true, tot_false
+                    )
+                else:
+                    split_val, best_agree = self._find_surrogate_categorical(
+                        col[both_valid], target_left, w_valid
+                    )
+                    go_left = True
+
+                # hanya simpan surrogate yang lebih baik dari aturan mayoritas
+                if split_val is not None and best_agree > maj_agree:
+                    assoc = (best_agree - maj_agree) / p_min
+                    candidates.append((assoc, f_idx, split_val, go_left))
+
+            candidates.sort(key=lambda item: (-item[0], item[1]))
+            return [(f_idx, s_val, go_left) for _, f_idx, s_val, go_left in candidates[: self.max_surrogates]]
+
     def _best_split(
             self, X: np.ndarray, y_idx: np.ndarray, sample_weight: np.ndarray
         ) -> tuple[int | None, float | None, set[Any] | None, bool, float]:
@@ -218,21 +338,14 @@ class DecisionTree:
             col = X[:, f_idx]
 
             # cek apakah tipe numerik atau kategorikal
-            is_num = np.issubdtype(col.dtype, np.number)
-
-            # pembersihan
-            if not is_num:
-                non_missing = [v for v in col if not is_missing(v)]
-                is_num = len(non_missing) > 0 and all(isinstance(v, (int, float, np.number)) for v in non_missing)
-
-            if is_num:
+            if is_numeric_col(col):
                 thresh, _, gain = self._find_best_numeric(col, y_idx, sample_weight)
                 if thresh is not None and gain > best_gain:
                     best_gain = gain
                     best_feat = f_idx
                     best_thresh = thresh
                     best_cats = None
-                    valid = np.array([not is_missing(v) for v in col], dtype=bool)
+                    valid = valid_mask(col)
                     left_count = np.sum(col[valid].astype(float) <= thresh)
                     best_majority_left = left_count >= (np.sum(valid) - left_count)
             else:
@@ -242,7 +355,7 @@ class DecisionTree:
                     best_feat = f_idx
                     best_thresh = None
                     best_cats = cats
-                    valid = np.array([not is_missing(v) for v in col], dtype=bool)
+                    valid = valid_mask(col)
                     left_count = sum(1 for v in col[valid] if v in cats)
                     best_majority_left = left_count >= (np.sum(valid) - left_count)
 
@@ -278,21 +391,20 @@ class DecisionTree:
         if best_feat is None or best_gain <= 0.0: return node
 
         col = X[:, best_feat]
-        if best_thresh is not None: # fitur numerik
-            missing_mask = np.array([is_missing(v) for v in col], dtype=bool)
-            left_mask = np.zeros(n_samples, dtype=bool)
-            known_mask = ~missing_mask
-            if np.any(known_mask):
+        known_mask = valid_mask(col)
+        missing_mask = ~known_mask
+        left_mask = np.zeros(n_samples, dtype=bool)
+        if np.any(known_mask):
+            if best_thresh is not None: # fitur numerik
                 left_mask[known_mask] = col[known_mask].astype(float) <= best_thresh
-            left_mask[missing_mask] = best_maj_left
-        else: # fitur kategorikal
-            assert best_cats is not None
-            missing_mask = np.array([is_missing(v) for v in col], dtype=bool)
-            left_mask = np.zeros(n_samples, dtype=bool)
-            known_mask = ~missing_mask
-            if np.any(known_mask):
+            else: # fitur kategorikal
+                assert best_cats is not None
                 left_mask[known_mask] = np.array([v in best_cats for v in col[known_mask]], dtype=bool)
-            left_mask[missing_mask] = best_maj_left
+
+        surrogates = self._find_surrogates(X, best_feat, known_mask, left_mask, sample_weight)
+        if np.any(missing_mask):
+            for idx in np.flatnonzero(missing_mask):
+                left_mask[idx] = self._route_missing(X[idx], surrogates, best_maj_left)
 
         right_mask = ~left_mask
 
@@ -303,6 +415,7 @@ class DecisionTree:
         node.feature_index = best_feat
         node.threshold = best_thresh
         node.left_categories = best_cats
+        node.surrogates = surrogates if surrogates else None
         node.majority_go_left = best_maj_left
 
         # rekursi
@@ -319,7 +432,8 @@ class DecisionTree:
         val = row[node.feature_index]
 
         if is_missing(val):
-            next_node = node.left if node.majority_go_left else node.right
+            go_left = self._route_missing(row, node.surrogates, node.majority_go_left)
+            next_node = node.left if go_left else node.right
             return self._traverse(row, next_node if next_node is not None else node)
 
         if node.threshold is not None:
@@ -383,6 +497,21 @@ class DecisionTree:
             weakest.feature_index = None
             weakest.threshold = None
             weakest.left_categories = None
+            weakest.surrogates = None
+
+    # fungsi bantu arahkan missing value lewat surrogate
+    @staticmethod
+    def _route_missing(
+            row: np.ndarray, surrogates: list[tuple[int, float | set[Any], bool]] | None,
+            majority_go_left: bool
+        ) -> bool:
+            if surrogates:
+                for s_feat, s_val, go_left_when_true in surrogates:
+                    val = row[s_feat]
+                    if is_missing(val): continue
+                    matched = val in s_val if isinstance(s_val, set) else float(val) <= float(s_val)
+                    return matched if go_left_when_true else not matched
+            return majority_go_left
 
     # fungsi Gini_Index(T)
     @staticmethod
