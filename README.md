@@ -40,11 +40,17 @@ uv run predict <model-name>.pkl
 
 Only load `.pickle` files from `output/models/`.
 
+## notes
+
+- Jupyter notebook: [here](src/notebook.ipynb)
+- Jupyter notebook PDF: [here](docs/notebook.pdf)
+- Laporan: [here](docs/Laporan_IF3170_G10_prdlidialogkomAI.pdf)
+
 ## authors
-| No. | Nama | NIM |
-|---:|---|---|
-| 1 | Irvin Tandiarrang Sumual | 13524030 |
-| 2 | Bernhard Aprillio Pramana | 13524074 |
-| 3 | Moreno Syawali Ganda Sugita | 13524096 |
-| 4 | Jennifer Khang | 13524110 |
-| 5 | Nathaniel Christian | 13524122 |
+| No. | Nama | NIM | Tugas |
+|---:|---|---|---|
+| 1 | Irvin Tandiarrang Sumual | 13524030 | Preprocessing, Implement SVM |
+| 2 | Bernhard Aprillio Pramana | 13524074 | Dokumen, Implement Bayes |
+| 3 | Moreno Syawali Ganda Sugita | 13524096 | Dokumen, Implement Logistic Regression |
+| 4 | Jennifer Khang | 13524110 | Preprocessing, Implement DTL |
+| 5 | Nathaniel Christian | 13524122 | Preprocessing, Implement KNN, Ngurusin Repo |
