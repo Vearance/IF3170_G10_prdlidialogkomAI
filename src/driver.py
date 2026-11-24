@@ -331,9 +331,18 @@ def knn_main() -> None:
     parser.add_argument(
         "--weights", choices=["uniform", "distance"], default="distance"
     )
+    parser.add_argument(
+        "--metric",
+        choices=["euclidean", "correlation"],
+        default="euclidean",
+        help="Distance metric (default: euclidean).",
+    )
     args = parser.parse_args()
     _run_algorithm(
-        "knn", n_neighbors=args.n_neighbors, weights=args.weights
+        "knn",
+        n_neighbors=args.n_neighbors,
+        weights=args.weights,
+        metric=args.metric,
     )
 
 
