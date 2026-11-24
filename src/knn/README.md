@@ -1,12 +1,6 @@
 ## distance metrics
 
-KNN supports two distance metrics:
-
-- `euclidean`: the original Euclidean distance, with equal feature weights.
-- `correlation`: standardizes each feature and weights it by its absolute correlation with the training labels, reducing the influence of weakly predictive features.
-
-Correlation weights are estimated using training data only. The default remains
-Euclidean to preserve existing behavior.
+KNN supports `euclidean` (default) and `correlation`, which weights standardized features by their correlation with training labels.
 
 ## param command example
 
